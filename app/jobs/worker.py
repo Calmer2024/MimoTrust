@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import time
+from datetime import datetime
+from typing import Any
+
+from app.jobs.artifacts import store_job_artifacts
+from app.jobs.models import EvidenceSummary, MobileResultCard, utc_now
+from app.jobs.runtime import JobRuntime
+from app.models import AnalyzeRequest, AnalyzeResponse
+
+
+STAGE_DETAILS = {
+    "search_plan": ("evidence_retrieval", "正在制定多源检索计划", 52),
+    "retrieval": ("evidence_retrieval", "正在检索并读取公开来源", 66),
+    "evidence_triage": ("evidence_triage", "正在核对来源身份与证据直接性", 79),
+    "report_generation": ("report_generating", "正在汇总结论与不确定项", 91),
+}
+
+
+class JobCancelled(Exception):
+    pass
+
+
+def _evidence_summaries(verification: dict[str, Any]) -> list[EvidenceSummary]:
+    output: list[EvidenceSummary] = []
+    for item in verification.get("evidence_used", [])[:2]:
+        if not isinstance(item, dict):
+            continue
+        output.append(EvidenceSummary(
+            title=str(item.get("title") or item.get("name") or "公开来源"),
+            url=item.get("url"),
+            source_name=item.get("source_name") or item.get("domain"),
+        ))
+    return output
+
+
+def build_mobile_card(job_id: str, result: AnalyzeResponse, completed_at: datetime) -> MobileResultCard:
+    verification = result.verification or {}
+    verdict = str(verification.get("overall_verdict") or "待核实")
+    headline_map = {
+        "属实": "证据支持主要说法",
+        "部分属实": "部分说法存在关键差异",
+        "误导": "内容可能造成误导",
+        "虚假": "关键说法与证据不符",
+        "证据不足": "暂缺足够证据",
+        "待核实": "仍需更多可靠来源",
+    }
+    uncertainty = verification.get("uncertainties") or []
+    return MobileResultCard(
+        job_id=job_id,
+        verdict=verdict,
+        headline=headline_map.get(verdict, f"核验结论：{verdict}"),
+        conclusion=str(verification.get("conclusion") or "核验已完成，请查看逐项证据。"),
+        evidence_count=int(verification.get("evidence_selected_count") or len(verification.get("source_ids") or [])),
+        elapsed_ms=result.full_pipeline_milliseconds,
+        completed_at=completed_at,
+        key_evidence=_evidence_summaries(verification),
+        uncertainty_note=str(uncertainty[0]) if uncertainty else None,
+    )
+
+
+async def process_job(runtime: JobRuntime, job_id: str) -> None:
+    started = time.perf_counter()
+
+    def elapsed() -> int:
+        return round((time.perf_counter() - started) * 1000)
+
+    async def ensure_not_cancelled() -> None:
+        current = await runtime.store.get(job_id)
+        if current and current.cancel_requested:
+            raise JobCancelled()
+
+    try:
+        job = await runtime.store.get(job_id)
+        if not job:
+            return
+        if job.cancel_requested:
+            await runtime.emit(job_id, "cancelled", "cancelled", "核验已取消", 100, status="cancelled", completed_at=utc_now())
+            return
+        await runtime.emit(
+            job_id, "content_resolving", "running", "正在读取分享内容", 8,
+            status="running", started_at=utc_now(), elapsed_ms=elapsed(),
+        )
+        from app.main import analyze_content
+
+        await runtime.emit(job_id, "media_extracting", "running", "正在理解视频、字幕与画面", 22, elapsed_ms=elapsed())
+        result = await analyze_content(AnalyzeRequest(
+            url=job.source.value,
+            input_kind="auto",
+            mode=job.mode,
+            refresh=False,
+            verify=False,
+        ))
+        await ensure_not_cancelled()
+        await runtime.emit(
+            job_id, "claim_structuring", "running",
+            f"已识别 {len(result.structured_data.atomic_claims)} 条待核验主张",
+            42, elapsed_ms=elapsed(),
+        )
+
+        async def on_stage(stage: str) -> None:
+            await ensure_not_cancelled()
+            mapped = STAGE_DETAILS.get(stage)
+            if mapped:
+                await runtime.emit(job_id, mapped[0], "running", mapped[1], mapped[2], elapsed_ms=elapsed())
+
+        from app.trust.service import verify_structured_information
+        result.verification = await verify_structured_information(result.structured_data, stage_callback=on_stage)
+        result.full_pipeline_milliseconds = max(result.full_pipeline_milliseconds, elapsed())
+        completed_at = utc_now()
+        card = build_mobile_card(job_id, result, completed_at)
+        try:
+            report_url = await store_job_artifacts(
+                job_id,
+                result.model_dump(mode="json"),
+                str((result.verification or {}).get("report_markdown") or ""),
+            )
+        except Exception:
+            report_url = None
+        if report_url:
+            card.report_url = report_url
+        payload = {
+            "card": card.model_dump(mode="json"),
+            "analysis": result.model_dump(mode="json"),
+        }
+        await runtime.emit(
+            job_id, "completed", "completed", card.headline, 100,
+            status="completed", completed_at=completed_at,
+            elapsed_ms=elapsed(), result=payload,
+        )
+    except JobCancelled:
+        await runtime.emit(
+            job_id, "cancelled", "cancelled", "核验已取消", 100,
+            status="cancelled", completed_at=utc_now(), elapsed_ms=elapsed(),
+        )
+    except Exception as exc:
+        await runtime.emit(
+            job_id, "failed", "failed", "本次核验未完成，可稍后重试", 100,
+            status="failed", completed_at=utc_now(), elapsed_ms=elapsed(),
+            error_code=type(exc).__name__, error_message=str(exc)[:500],
+        )
+
+
+async def run_job(ctx: dict[str, Any], job_id: str) -> None:
+    runtime = ctx["runtime"]
+    await process_job(runtime, job_id)
+
+
+async def startup(ctx: dict[str, Any]) -> None:
+    runtime = JobRuntime("distributed")
+    await runtime.initialize()
+    ctx["runtime"] = runtime
+
+
+class WorkerSettings:
+    functions = [run_job]
+    on_startup = startup
+    queue_name = "mimotrust:jobs"
+    max_jobs = 4
+    job_timeout = 1800

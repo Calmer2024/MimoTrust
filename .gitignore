@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.cache/
+data/trust/
+*.egg-info/
+*.pyc
+cookies*.txt
+android/local.properties
+android/.gradle/
+android/app/build/
