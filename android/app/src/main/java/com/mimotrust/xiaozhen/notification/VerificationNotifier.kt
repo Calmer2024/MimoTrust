@@ -39,13 +39,16 @@ class VerificationNotifier(private val context: Context) {
         notify(job.jobId, "小真正在核验", job.displayText, job.progress, job.status == "running")
     }
 
-    fun showResult(job: JobEntity) = notify(
-        job.jobId,
-        title = job.headline ?: "核验完成",
-        text = job.conclusion ?: job.displayText,
-        progress = null,
-        ongoing = false,
-    )
+    fun showResult(job: JobEntity) {
+        if (xiaomi.publishApprovedTemplate(job)) return
+        notify(
+            job.jobId,
+            title = job.headline ?: "核验完成",
+            text = job.conclusion ?: job.displayText,
+            progress = null,
+            ongoing = false,
+        )
+    }
 
     private fun notify(jobId: String, title: String, text: String, progress: Int?, ongoing: Boolean) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
@@ -71,4 +74,3 @@ class VerificationNotifier(private val context: Context) {
 
     companion object { const val CHANNEL_ID = "mimo_verification_progress" }
 }
-

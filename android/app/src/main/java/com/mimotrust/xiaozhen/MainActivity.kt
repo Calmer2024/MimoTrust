@@ -10,6 +10,7 @@ import androidx.activity.viewModels
 import com.mimotrust.xiaozhen.ui.MimoTrustApp
 import com.mimotrust.xiaozhen.ui.MainViewModel
 import com.mimotrust.xiaozhen.ui.MainViewModelFactory
+import com.mimotrust.xiaozhen.overlay.FloatingBallManager
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels {
@@ -20,7 +21,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        FloatingBallManager.restore(this)
         setContent { MimoTrustApp(viewModel, intent.getStringExtra("job_id")) }
     }
 }
-

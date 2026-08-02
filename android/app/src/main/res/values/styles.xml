@@ -2,9 +2,9 @@
 <resources>
     <style name="Theme.MimoTrust" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#202020</item>
-        <item name="android:navigationBarColor">#F7F7F5</item>
-        <item name="android:statusBarColor">#F7F7F5</item>
+        <item name="android:colorAccent">#FF5A1F</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
     <style name="Theme.MimoTrust.Transparent" parent="android:style/Theme.Material.Light.NoActionBar">
@@ -15,4 +15,3 @@
         <item name="android:windowDisablePreview">true</item>
     </style>
 </resources>
-
