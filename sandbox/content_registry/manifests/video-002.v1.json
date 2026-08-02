@@ -1,0 +1,66 @@
+{
+  "manifest_version": "1.0",
+  "provider": {
+    "provider_id": "mimotrust_sandbox"
+  },
+  "content": {
+    "content_type": "video",
+    "content_id": "video-002",
+    "content_version": "v1",
+    "content_hash": "6c49aeeffcfebf35b9bec28322d8ca4dda743d0976a802bca2c8b6ab826bb478",
+    "canonical_url": "https://sandbox.mimotrust.local/content/video-002",
+    "title": "2026年城乡居民基础养老金月最低标准再提高20元",
+    "author": "农业日报",
+    "published_at": "2026-03-05T00:00:00+08:00",
+    "asset_order": ["video-main", "video-cover"]
+  },
+  "assets": [
+    {
+      "asset_id": "video-main",
+      "role": "analysis",
+      "mime_type": "video/mp4",
+      "source_url": "https://sourcecheckcheck.oss-cn-beijing.aliyuncs.com/%E5%85%BB%E8%80%81%E9%87%91.mp4",
+      "sha256": "6c49aeeffcfebf35b9bec28322d8ca4dda743d0976a802bca2c8b6ab826bb478",
+      "size_bytes": 3038117,
+      "duration_ms": 19301,
+      "width": 720,
+      "height": 1280,
+      "video_codec": "H.264",
+      "audio_codec": "MP4A",
+      "derivation": "original",
+      "original_name": "养老金.mp4",
+      "storage": {
+        "provider": "aliyun_oss",
+        "object_key": "养老金.mp4",
+        "bucket": "sourcecheckcheck",
+        "endpoint": "oss-cn-beijing.aliyuncs.com"
+      }
+    },
+    {
+      "asset_id": "video-cover",
+      "role": "cover",
+      "mime_type": "image/png",
+      "source_url": "http://127.0.0.1:8787/assets/images/video-002-cover.png",
+      "sha256": "96a6fa19a21e2e034a2d1c0995c2dff70b48d97793da6a6f7f54e2e0ba139fc9",
+      "size_bytes": 650286,
+      "width": 717,
+      "height": 1269,
+      "derivation": "original",
+      "original_name": "养老金.png",
+      "storage": {
+        "provider": "local",
+        "object_key": "assets/images/video-002-cover.png"
+      }
+    }
+  ],
+  "rights": {
+    "purpose": ["fact_check"],
+    "retention_seconds": 3600,
+    "redistribution_allowed": false
+  },
+  "sandbox": {
+    "access_enforcement": "mock_gateway_only",
+    "development_asset": true,
+    "notes": "开发期 OSS 域名仍含旧命名；正式演示前迁移到最终命名的私有 Bucket。"
+  }
+}
