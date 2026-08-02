@@ -28,7 +28,15 @@ def main() -> int:
     base_url = args.gateway.rstrip("/")
 
     _, health = request_json(f"{base_url}/health")
-    if health.get("status") != "ok" or health.get("content_count") != 1:
+    content_count = health.get("content_count")
+    if (
+        health.get("status") != "ok"
+        or health.get("provider_id") != "mimotrust_sandbox"
+        or health.get("manifest_version") != "1.0"
+        or not isinstance(content_count, int)
+        or isinstance(content_count, bool)
+        or content_count < 1
+    ):
         raise RuntimeError(f"unexpected health response: {health}")
 
     grant_request = {

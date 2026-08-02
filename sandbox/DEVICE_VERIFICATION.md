@@ -69,3 +69,20 @@ MiMoTrustSandbox: CONTENT_CONTEXT_SEND event_id=... type=video trigger=share
 由于 `com.mimotrust.guardian` 尚未安装，本轮只能证明沙盒发送端执行了固定目标包的
 显式广播，不能证明 Receiver 已收到、校验或入队。完整跨 App 验收必须等待正式守护者
 Receiver 安装后进行，不得改投 `com.mimotrust.xiaozhen`。
+
+## 云端网关回归（2026-08-02）
+
+- 阿里云 ECS 网关：`http://47.94.58.72`；
+- 部署形态：Nginx `:80` -> Python `127.0.0.1:8787`，systemd 常驻；
+- 公网验证：健康检查、grant 签发、一次兑换、视频下载、SHA-256 和重放拒绝通过；
+- 构建配置：`config/cloud-debug.json`；
+- APK 大小：`188045219` bytes；
+- APK SHA-256：`8fc845ef522546133106e6a5dd28e6220eb49761582f68d7fa95554345add5c0`；
+- Android 安装器和桌面启动器显示名称：`sandbox`；
+- Dart 静态分析：无问题；Flutter 测试：`25/25`；网关测试：`10/10`；
+- Xiaomi `25057RA09C` 覆盖安装成功，三视频首屏播放正常；
+- `adb reverse --list` 为空，App 不依赖本地端口转发；
+- 打开评论面板后记录到一条 `trigger=comment` 的 `CONTENT_CONTEXT_SEND`。
+
+本次只验证当前 Context 2.1 沙盒发送端改用云端网关。Context 2.2 主动请求和正式守护者
+Receiver 仍未实施。公网入口目前是 Debug 明文 HTTP，正式演示前必须迁移到 HTTPS 域名。

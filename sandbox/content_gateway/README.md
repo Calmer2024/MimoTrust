@@ -47,3 +47,18 @@ python sandbox\tools\verify_first_round.py --gateway http://127.0.0.1:8787
 
 最后一个命令会实际下载 `video-001`，流式检查 MIME、字节数和 SHA-256，并确认同一
 grant 的第二次兑换返回 `GRANT_REPLAYED`。
+
+## 当前云端 Debug 环境
+
+2026-08-02 已在阿里云 ECS 单实例部署：
+
+```text
+公网网关：http://47.94.58.72
+Python 服务：127.0.0.1:8787
+公网入口：Nginx :80
+```
+
+公网验证已通过健康检查、grant 签发、一次兑换、视频下载、SHA-256 校验和重放拒绝。
+当前仅用于三视频 Debug 联调；`8787` 不对公网开放，grant 仍为进程内存状态，因此不得
+扩展为多实例。正式演示前必须配置 HTTPS 域名，生产化前必须将 grant 迁移到支持原子
+单次兑换的共享存储。

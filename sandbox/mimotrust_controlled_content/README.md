@@ -4,6 +4,7 @@ Flutter 3.44.2 / Dart 3.12.2 创建的全新 Android 工程。
 
 当前阶段实现：
 
+- Android 安装器和桌面启动器显示名称为 `sandbox`；页面品牌仍为 `MiMoTrust`；
 - 固定 applicationId：`com.mimotrust.controlledcontent`；
 - 从打包的 `registry.json` 按 `display_order` 加载三条视频 Manifest；
 - 校验 Manifest 1.0、Provider、内容身份和分析资源哈希；
@@ -32,15 +33,28 @@ Flutter 3.44.2 / Dart 3.12.2 创建的全新 Android 工程。
 `CONTENT_CONTEXT_SEND` 只表示 Android 已执行尽力发送，不表示守护者已接收或创建任务。
 点赞、提交本地评论和完成模拟转发均不准备或发送上下文。
 
-Debug 真机联调默认使用 `http://127.0.0.1:8787`，需要先启动网关并转发端口：
+当前三视频云端 Debug 环境使用阿里云 ECS 网关：
+
+```text
+http://47.94.58.72
+```
+
+该地址保存在 `config/cloud-debug.json`，构建云端联调 APK 时使用：
+
+```powershell
+flutter build apk --debug --dart-define-from-file=config/cloud-debug.json
+```
+
+本地网关仍可用于离线开发。启动本地网关并转发端口：
 
 ```powershell
 python -m sandbox.content_gateway.server --host 127.0.0.1 --port 8787
 adb reverse tcp:8787 tcp:8787
 ```
 
-可在构建时通过 `--dart-define=MIMOTRUST_GATEWAY_URL=...` 覆盖开发网关地址。
-明文 HTTP 仅在 `android/app/src/debug/AndroidManifest.xml` 中启用。
+也可在构建时通过 `--dart-define=MIMOTRUST_GATEWAY_URL=...` 临时覆盖地址。环境地址不写死在 Dart 业务代码中。
+
+公网网关当前只有 IP，因此暂时使用明文 HTTP；明文流量仅在 `android/app/src/debug/AndroidManifest.xml` 中启用。Release 构建必须改用已配置可信证书的 HTTPS 域名。
 
 ## 验证
 
@@ -48,7 +62,7 @@ adb reverse tcp:8787 tcp:8787
 flutter pub get
 dart analyze
 flutter test
-flutter build apk --debug
+flutter build apk --debug --dart-define-from-file=config/cloud-debug.json
 ```
 
 Debug APK：

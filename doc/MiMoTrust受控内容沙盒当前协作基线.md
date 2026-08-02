@@ -25,6 +25,7 @@
 | 项目 | 固定值 |
 |---|---|
 | 沙盒 applicationId | `com.mimotrust.controlledcontent` |
+| Android 启动器显示名称 | `sandbox`（仅显示名称，不改变协议） |
 | 守护者 applicationId | `com.mimotrust.guardian` |
 | Flutter MethodChannel | `com.mimotrust.controlledcontent/context` |
 | 守护者请求 Action（2.2 目标） | `com.mimotrust.intent.action.REQUEST_CONTENT_CONTEXT` |
@@ -59,7 +60,7 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 |---|---|---|
 | Context 2.1 Schema | 完成 | 5 个合法样例通过，5 个非法样例拒绝 |
 | Manifest 1.0 | 完成 | 3 个活动视频 Manifest 通过校验 |
-| 最小内容网关 | 完成 | 4 个路由，内存 grant，180 秒过期，单次兑换 |
+| 最小内容网关 | 完成并部署 Debug 环境 | 阿里云 ECS `http://47.94.58.72`，4 个路由，内存 grant，180 秒过期，单次兑换 |
 | Flutter Android App | 完成当前视频阶段 | 三视频竖向 Feed、本地互动和异常降级 |
 | Flutter 到 Kotlin | 完成 | 固定 MethodChannel，单字符串 Payload |
 | Kotlin 显式广播 | 完成 | 固定 Action、目标包和 Extra，32 KB 上限 |
@@ -171,10 +172,10 @@ sequenceDiagram
 
 ## 8. 平台内容网关合同
 
-当前开发网关默认地址：
+当前云端 Debug 网关地址：
 
 ```text
-http://127.0.0.1:8787
+http://47.94.58.72
 ```
 
 路由：
@@ -216,7 +217,8 @@ CONTENT_MISMATCH
 CONTENT_UNAVAILABLE
 ```
 
-开发地址和内存实现不是生产合同。后期允许替换数据源、域名和持久化实现，但必须保持
+云端当前为 ECS 单实例、Nginx HTTP 入口和内存 grant，已通过公网健康检查、签发、兑换、
+视频下载、SHA-256 和重放拒绝验证。该地址和内存实现不是生产合同。后期允许替换数据源、域名和持久化实现，但必须保持
 请求语义、Audience、Manifest 1.0 和单次 grant 兑换约束。
 
 ## 9. Android 广播合同
@@ -323,9 +325,16 @@ MiMoTrustGateway:  CONTENT_GRANT_EXCHANGED grant_id=... content_id=...
 日志不得记录完整 Payload、`grant_code`、签名 URL、评论正文、联系人、Cookie 或账号
 凭据。
 
-## 12. 本地启动与联调
+## 12. 云端与本地联调
 
-在仓库根目录启动网关：
+云端 Debug APK 使用：
+
+```powershell
+cd sandbox\mimotrust_controlled_content
+flutter build apk --debug --dart-define-from-file=config/cloud-debug.json
+```
+
+只有切回本地开发网关时才需要：
 
 ```powershell
 python -m sandbox.content_gateway.server --host 127.0.0.1 --port 8787
@@ -342,7 +351,9 @@ adb install -r sandbox\mimotrust_controlled_content\build\app\outputs\flutter-ap
 
 ```text
 大小：188045219 bytes
-SHA-256：d975e6e4d9bfeb37d315d5f8aca71d755a242259e5dc51327e4749e4452e9a44
+SHA-256：8fc845ef522546133106e6a5dd28e6220eb49761582f68d7fa95554345add5c0
+网关配置：http://47.94.58.72
+状态：已在 Xiaomi 25057RA09C 覆盖安装并完成云端回归
 ```
 
 建议联调日志命令：
@@ -420,6 +431,7 @@ adb reverse --list
 - `doc/沙盒下阶段实现交接说明.md`；
 - `doc/MiMoTrust受控内容沙盒冻结规格.md`；
 - `doc/MiMoTrust受控内容沙盒跨系统协作文档.md`；
+- `doc/MiMoTrust受控内容沙盒首轮交付报告.md`；
 - `contracts/content_context.schema.json`；
 - `contracts/content_manifest.schema.json`；
 - `sandbox/IMPLEMENTATION_CONTRACT.md`；
