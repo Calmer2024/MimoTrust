@@ -1,8 +1,14 @@
+import asyncio
 import inspect
 
-from app import mimo
+import pytest
+from fastapi import HTTPException
+
+from app import main as main_module, mimo
 from app.content import extract_article
-from app.main import _is_direct_video_url, app
+from app.main import _execute_analysis, _is_direct_video_url, app
+from app.models import AnalyzeRequest
+from app.pipeline import PipelineError
 from app.security import resolve_content_input, validate_video_url
 from fastapi.testclient import TestClient
 
@@ -87,3 +93,31 @@ def test_health_reports_expanded_input_scope() -> None:
 
     assert {"快手", "微博", "小红书", "视频号"} <= set(payload["supported_platforms"])
     assert "文章 URL" in payload["accepted_inputs"]
+
+
+def test_auto_platform_error_is_not_replaced_by_article_fallback(monkeypatch) -> None:
+    url = "https://www.douyin.com/video/123"
+    article_called = False
+
+    async def fail_platform(_url: str, _mode: str):
+        raise PipelineError("抖音浏览器适配器不可用")
+
+    async def fail_if_article(_url: str):
+        nonlocal article_called
+        article_called = True
+        raise AssertionError("platform URLs must not fall back to article extraction")
+
+    monkeypatch.setattr(main_module, "resolve_content_input", lambda *_args, **_kwargs: url)
+    monkeypatch.setattr(main_module, "analyze", fail_platform)
+    monkeypatch.setattr(main_module, "analyze_article_url", fail_if_article)
+
+    with pytest.raises(HTTPException) as captured:
+        asyncio.run(
+            _execute_analysis(
+                AnalyzeRequest(url=url, input_kind="auto", refresh=True, verify=False)
+            )
+        )
+
+    assert captured.value.status_code == 422
+    assert captured.value.detail == "抖音浏览器适配器不可用"
+    assert article_called is False

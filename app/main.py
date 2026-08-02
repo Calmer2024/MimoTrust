@@ -326,8 +326,8 @@ async def _execute_analysis(
             except PipelineError:
                 if (
                     request.input_kind == "platform"
+                    or is_platform
                     or is_direct_video
-                    or hostname.endswith(("kuaishou.com", "gifshow.com"))
                 ):
                     raise
                 result = await analyze_article_url(url)

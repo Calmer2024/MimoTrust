@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 import yt_dlp
 
-from app import pipeline
+from app import douyin_cookies, pipeline
 from app.douyin_cookies import DouyinCookieError, _browser_aweme_info
 
 
@@ -19,6 +19,23 @@ from app.douyin_cookies import DouyinCookieError, _browser_aweme_info
 )
 def test_douyin_session_error_recognizes_refreshable_failures(detail: str) -> None:
     assert pipeline._is_douyin_session_error(RuntimeError(detail))
+
+
+def test_browser_path_falls_back_to_playwright_chromium(
+    monkeypatch, tmp_path: Path
+) -> None:
+    chromium = tmp_path / "chromium"
+    chromium.write_text("browser", encoding="utf-8")
+    monkeypatch.setattr(
+        douyin_cookies,
+        "_edge_path",
+        lambda: (_ for _ in ()).throw(DouyinCookieError("Edge missing")),
+    )
+    playwright = SimpleNamespace(
+        chromium=SimpleNamespace(executable_path=str(chromium))
+    )
+
+    assert douyin_cookies._browser_executable_path(playwright) == str(chromium)
 
 
 def test_extract_info_refreshes_douyin_session_once(monkeypatch) -> None:
