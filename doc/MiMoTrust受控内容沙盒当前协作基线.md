@@ -69,7 +69,7 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 | Context 2.1 Schema | 完成 | 5 个合法样例通过，5 个非法样例拒绝 |
 | Manifest 1.0 | 完成 | 3 个活动视频 Manifest 通过校验 |
 | 最小内容网关 | 完成并部署 Debug 环境 | 阿里云 ECS `http://47.94.58.72`，5 个路由，运行时 registry 自动重载，内存 grant，180 秒过期，单次兑换 |
-| Flutter Android App | 完成远程多类型 Feed 阶段 | 远程优先、内置回退；五类模型/渲染器、本地互动和异常降级 |
+| Flutter Android App | 完成远程多类型 Feed 阶段 | 远程优先、内置回退；文章/图文/画廊采用 Feed 预览与独立详情；五类模型/渲染器、本地互动和异常降级 |
 | Flutter 到 Kotlin | 完成 | 固定 MethodChannel，单字符串 Payload |
 | Kotlin 显式广播 | 完成 | 固定 Action、目标包和 Extra，32 KB 上限 |
 | Context 2.2 Schema/样例 | 待迁移 | 目标合同已冻结，尚未改代码和合同测试 |
@@ -361,7 +361,7 @@ adb install -r sandbox\mimotrust_controlled_content\build\app\outputs\flutter-ap
 
 ```text
 大小：220011733 bytes
-SHA-256：0c6b097a8ce52066a414775d91ebd52d8ff2be85abea8dd80956bb695866355c
+SHA-256：9c6a4af36935dae12d6bbad667f6827a38605fd9f90e530831fb928ac262fccf
 网关配置：http://47.94.58.72
 状态：构建完成；当前 ADB 无设备，本次多类型版本尚未完成真机安装
 ```
@@ -385,7 +385,7 @@ adb reverse --list
 ## 13. 当前验收证据
 
 - Dart 静态分析：无错误，1 条 `use_super_parameters` 风格提示；
-- Flutter 测试：30/30；
+- Flutter 测试：35/35；
 - 网关测试：13/13；
 - 开发者内容管理服务测试：13/13；
 - 合同校验：5 个合法 Context、5 个非法 Context、3 个活动 Manifest；

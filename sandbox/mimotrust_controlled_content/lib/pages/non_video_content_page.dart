@@ -19,6 +19,11 @@ class NonVideoContentPage extends StatefulWidget {
     super.key,
     required this.content,
     required this.isActive,
+    this.isDetail = false,
+    this.initialReadingOffset = 0,
+    this.initialGalleryIndex = 0,
+    this.onReadingOffsetChanged,
+    this.onGalleryIndexChanged,
     this.interactionStore = const SharedPreferencesInteractionStore(),
     this.contextDispatcher,
     this.httpClient,
@@ -26,6 +31,11 @@ class NonVideoContentPage extends StatefulWidget {
 
   final SandboxContent content;
   final bool isActive;
+  final bool isDetail;
+  final double initialReadingOffset;
+  final int initialGalleryIndex;
+  final ValueChanged<double>? onReadingOffsetChanged;
+  final ValueChanged<int>? onGalleryIndexChanged;
   final InteractionStore interactionStore;
   final ContextDispatcher? contextDispatcher;
   final http.Client? httpClient;
@@ -36,8 +46,9 @@ class NonVideoContentPage extends StatefulWidget {
 
 class _NonVideoContentPageState extends State<NonVideoContentPage>
     with WidgetsBindingObserver {
-  final ScrollController _readingController = ScrollController();
-  final PageController _galleryController = PageController();
+  late final ScrollController _readingController;
+  late final PageController _galleryController;
+  late final List<GlobalKey> _richBlockKeys;
   late final ContextDispatcher _contextDispatcher;
   late final bool _ownsContextDispatcher;
   late final http.Client _httpClient;
@@ -52,6 +63,10 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
   List<SandboxComment> _localComments = const <SandboxComment>[];
   int _sessionShareCount = 0;
   int _activeAssetIndex = 0;
+  int _visibleBlockIndex = 0;
+  double _readingProgress = 0;
+  bool _galleryZoomed = false;
+  bool _readingOffsetRestored = false;
   Duration _audioPosition = Duration.zero;
   Duration? _audioDuration;
   bool _audioLoading = false;
@@ -65,6 +80,18 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
   @override
   void initState() {
     super.initState();
+    final galleryCount = widget.content is ImageGalleryContent
+        ? (widget.content as ImageGalleryContent).images.length
+        : 1;
+    _activeAssetIndex = widget.initialGalleryIndex.clamp(0, galleryCount - 1);
+    _readingController = ScrollController()..addListener(_onReadingChanged);
+    _galleryController = PageController(initialPage: _activeAssetIndex);
+    _richBlockKeys = widget.content is RichArticleContent
+        ? List<GlobalKey>.generate(
+            (widget.content as RichArticleContent).blocks.length,
+            (index) => GlobalKey(debugLabel: 'rich-block-$index'),
+          )
+        : const <GlobalKey>[];
     _ownsContextDispatcher = widget.contextDispatcher == null;
     _contextDispatcher =
         widget.contextDispatcher ??
@@ -84,6 +111,10 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
     unawaited(_loadInteractions());
     if (widget.content case final ArticleContent article) {
       unawaited(_loadArticle(article));
+    } else if (widget.content is RichArticleContent) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _restoreReadingOffset();
+      });
     }
     if (widget.content case final AudioContent audio) {
       unawaited(_initializeAudio(audio));
@@ -119,6 +150,61 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
     }
   }
 
+  void _onReadingChanged() {
+    if (!_readingController.hasClients) return;
+    final maxExtent = _readingController.position.maxScrollExtent;
+    final progress = maxExtent <= 0
+        ? 0.0
+        : (_readingController.offset / maxExtent).clamp(0.0, 1.0);
+    final visibleBlock = _findVisibleRichBlock();
+    widget.onReadingOffsetChanged?.call(_readingController.offset);
+    if (mounted &&
+        ((progress - _readingProgress).abs() > 0.002 ||
+            visibleBlock != _visibleBlockIndex)) {
+      setState(() {
+        _readingProgress = progress;
+        _visibleBlockIndex = visibleBlock;
+      });
+    }
+  }
+
+  void _restoreReadingOffset() {
+    if (_readingOffsetRestored ||
+        !mounted ||
+        !_readingController.hasClients) {
+      return;
+    }
+    final target = widget.initialReadingOffset.clamp(
+      0.0,
+      _readingController.position.maxScrollExtent,
+    );
+    _readingOffsetRestored = true;
+    if (target > 0) _readingController.jumpTo(target);
+  }
+
+  int _findVisibleRichBlock() {
+    if (widget.content is! RichArticleContent || _richBlockKeys.isEmpty) {
+      return 0;
+    }
+    final anchor = MediaQuery.paddingOf(context).top + 74;
+    var result = _visibleBlockIndex;
+    var closestDistance = double.infinity;
+    for (var index = 0; index < _richBlockKeys.length; index += 1) {
+      final blockContext = _richBlockKeys[index].currentContext;
+      final renderObject = blockContext?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.attached) continue;
+      final top = renderObject.localToGlobal(Offset.zero).dy;
+      final bottom = top + renderObject.size.height;
+      if (bottom < anchor) continue;
+      final distance = (top - anchor).abs();
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        result = index;
+      }
+    }
+    return result;
+  }
+
   Future<void> _loadArticle(ArticleContent content) async {
     if (mounted) {
       setState(() {
@@ -134,7 +220,12 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
         throw StateError('HTTP ${response.statusCode}');
       }
       final body = utf8.decode(response.bodyBytes);
-      if (mounted) setState(() => _articleBody = body);
+      if (mounted) {
+        setState(() => _articleBody = body);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _restoreReadingOffset();
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _articleError = error);
     }
@@ -275,10 +366,9 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
     final ratio = maxExtent <= 0
         ? 0.0
         : (_readingController.offset / maxExtent).clamp(0.0, 1.0);
-    final blockCount = content is RichArticleContent ? content.blocks.length : 1;
     return ReadingViewState(
       scrollRatio: ratio,
-      blockIndex: (ratio * (blockCount - 1)).floor(),
+      blockIndex: content is RichArticleContent ? _visibleBlockIndex : 0,
     );
   }
 
@@ -300,6 +390,14 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
     }
   }
 
+  Future<void> _openImage(Uri imageUrl) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => FullScreenImagePage(imageUrl: imageUrl),
+      ),
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final player = _audioPlayer;
@@ -312,6 +410,11 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_readingController.hasClients) {
+      widget.onReadingOffsetChanged?.call(_readingController.offset);
+    }
+    widget.onGalleryIndexChanged?.call(_activeAssetIndex);
+    _readingController.removeListener(_onReadingChanged);
     _readingController.dispose();
     _galleryController.dispose();
     unawaited(_playerStateSubscription?.cancel());
@@ -328,13 +431,42 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7F8),
       body: Stack(
+        fit: StackFit.expand,
         children: [
           Positioned.fill(child: _contentBody()),
-          const _ContentHeader(),
-          Positioned(
-            right: 8,
-            bottom: 30,
-            child: _ContentActions(
+          _ContentHeader(
+            showBack: widget.isDetail,
+            readingProgress:
+                widget.content is ArticleContent ||
+                    widget.content is RichArticleContent
+                ? _readingProgress
+                : null,
+          ),
+          if (widget.isDetail)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _BottomContentActions(
+                liked: _liked,
+                likeCount:
+                    widget.content.displayMetrics.likeCount + (_liked ? 1 : 0),
+                commentCount:
+                    widget.content.displayMetrics.commentCount +
+                    _localComments.length,
+                shareCount:
+                    widget.content.displayMetrics.shareCount +
+                    _sessionShareCount,
+                onLike: _toggleLiked,
+                onComment: _openComments,
+                onShare: _openShare,
+              ),
+            )
+          else
+            Positioned(
+              right: 8,
+              bottom: 30,
+              child: _ContentActions(
               liked: _liked,
               likeCount:
                   widget.content.displayMetrics.likeCount + (_liked ? 1 : 0),
@@ -348,7 +480,7 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
               onComment: _openComments,
               onShare: _openShare,
             ),
-          ),
+            ),
         ],
       ),
     );
@@ -369,17 +501,27 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
       child: ListView(
         key: const Key('article-scroll'),
         controller: _readingController,
-        padding: const EdgeInsets.fromLTRB(22, 76, 68, 48),
+        padding: EdgeInsets.fromLTRB(
+          22,
+          76,
+          widget.isDetail ? 22 : 68,
+          widget.isDetail ? 118 : 48,
+        ),
         children: [
           _ArticleHeading(content: content),
           const SizedBox(height: 26),
           if (_articleBody != null)
-            SelectableText(
-              _articleBody!,
-              style: const TextStyle(
-                color: Color(0xFF24272B),
-                fontSize: 17,
-                height: 1.85,
+            ..._articleParagraphs(_articleBody!).map(
+              (paragraph) => Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: Text(
+                  paragraph,
+                  style: const TextStyle(
+                    color: Color(0xFF24272B),
+                    fontSize: 17,
+                    height: 1.85,
+                  ),
+                ),
               ),
             )
           else if (_articleError != null)
@@ -396,15 +538,21 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
       child: ListView.builder(
         key: const Key('rich-article-scroll'),
         controller: _readingController,
-        padding: const EdgeInsets.fromLTRB(22, 76, 68, 48),
+        padding: EdgeInsets.fromLTRB(
+          22,
+          76,
+          widget.isDetail ? 22 : 68,
+          widget.isDetail ? 118 : 48,
+        ),
         itemCount: content.blocks.length + 1,
         itemBuilder: (context, index) {
           if (index == 0) return _ArticleHeading(content: content);
           final block = content.blocks[index - 1];
           return Padding(
+            key: _richBlockKeys[index - 1],
             padding: const EdgeInsets.only(top: 20),
             child: block.type == 'text'
-                ? SelectableText(
+                ? Text(
                     block.text!,
                     style: const TextStyle(
                       color: Color(0xFF24272B),
@@ -412,12 +560,15 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
                       height: 1.8,
                     ),
                   )
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: Image.network(
-                      block.asset!.sourceUrl.toString(),
-                      fit: BoxFit.fitWidth,
-                      errorBuilder: _imageError,
+                : GestureDetector(
+                    onTap: () => _openImage(block.asset!.sourceUrl),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: Image.network(
+                        block.asset!.sourceUrl.toString(),
+                        fit: BoxFit.fitWidth,
+                        errorBuilder: _imageError,
+                      ),
                     ),
                   ),
           );
@@ -434,24 +585,33 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
           PageView.builder(
             key: const Key('gallery-pages'),
             controller: _galleryController,
+            physics: _galleryZoomed
+                ? const NeverScrollableScrollPhysics()
+                : const PageScrollPhysics(),
             itemCount: content.images.length,
-            onPageChanged: (index) => setState(() => _activeAssetIndex = index),
-            itemBuilder: (context, index) => InteractiveViewer(
-              minScale: 1,
-              maxScale: 4,
-              child: Center(
-                child: Image.network(
-                  content.images[index].sourceUrl.toString(),
-                  fit: BoxFit.contain,
-                  errorBuilder: _imageError,
-                ),
-              ),
+            onPageChanged: (index) {
+              setState(() {
+                _activeAssetIndex = index;
+                _galleryZoomed = false;
+              });
+              widget.onGalleryIndexChanged?.call(index);
+            },
+            itemBuilder: (context, index) => _ZoomableNetworkImage(
+              key: ValueKey(content.images[index].id),
+              imageUrl: content.images[index].sourceUrl,
+              onZoomChanged: index == _activeAssetIndex
+                  ? (zoomed) {
+                      if (mounted && zoomed != _galleryZoomed) {
+                        setState(() => _galleryZoomed = zoomed);
+                      }
+                    }
+                  : null,
             ),
           ),
           Positioned(
             left: 18,
-            right: 68,
-            bottom: 28,
+            right: widget.isDetail ? 18 : 68,
+            bottom: widget.isDetail ? 100 : 28,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -569,31 +729,162 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
       ),
     );
   }
+
+  static List<String> _articleParagraphs(String body) {
+    return body
+        .split(RegExp(r'\r?\n\s*\r?\n'))
+        .map((paragraph) => paragraph.trim())
+        .where((paragraph) => paragraph.isNotEmpty)
+        .toList(growable: false);
+  }
 }
 
 class _ContentHeader extends StatelessWidget {
-  const _ContentHeader();
+  const _ContentHeader({required this.showBack, this.readingProgress});
+
+  final bool showBack;
+  final double? readingProgress;
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-        child: Align(
-          alignment: Alignment.topLeft,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xE6111111),
-              borderRadius: BorderRadius.circular(4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
+            child: Row(
+              children: [
+                if (showBack)
+                  IconButton.filledTonal(
+                    key: const Key('content-detail-back'),
+                    tooltip: '返回',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                if (showBack) const SizedBox(width: 8),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xE6111111),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    child: Text(
+                      'MiMoTrust  ·  受控内容',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              child: Text(
-                'MiMoTrust  ·  受控内容',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          if (readingProgress != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: LinearProgressIndicator(
+                key: const Key('reading-progress'),
+                value: readingProgress,
+                minHeight: 2,
+                backgroundColor: Colors.transparent,
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class FullScreenImagePage extends StatelessWidget {
+  const FullScreenImagePage({super.key, required this.imageUrl});
+
+  final Uri imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          _ZoomableNetworkImage(imageUrl: imageUrl),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: IconButton.filledTonal(
+                  tooltip: '返回',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ZoomableNetworkImage extends StatefulWidget {
+  const _ZoomableNetworkImage({
+    super.key,
+    required this.imageUrl,
+    this.onZoomChanged,
+  });
+
+  final Uri imageUrl;
+  final ValueChanged<bool>? onZoomChanged;
+
+  @override
+  State<_ZoomableNetworkImage> createState() => _ZoomableNetworkImageState();
+}
+
+class _ZoomableNetworkImageState extends State<_ZoomableNetworkImage> {
+  final TransformationController _controller = TransformationController();
+  bool _zoomed = false;
+
+  void _updateZoomState() {
+    final zoomed = _controller.value.getMaxScaleOnAxis() > 1.01;
+    if (zoomed == _zoomed) return;
+    setState(() => _zoomed = zoomed);
+    widget.onZoomChanged?.call(zoomed);
+  }
+
+  void _toggleZoom() {
+    _controller.value = _zoomed
+        ? Matrix4.identity()
+        : Matrix4.diagonal3Values(2.5, 2.5, 1);
+    _updateZoomState();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onDoubleTap: _toggleZoom,
+      child: InteractiveViewer(
+        transformationController: _controller,
+        minScale: 1,
+        maxScale: 4,
+        panEnabled: _zoomed,
+        onInteractionUpdate: (_) => _updateZoomState(),
+        onInteractionEnd: (_) => _updateZoomState(),
+        child: Center(
+          child: Image.network(
+            widget.imageUrl.toString(),
+            fit: BoxFit.contain,
+            errorBuilder: _NonVideoContentPageState._imageError,
           ),
         ),
       ),
@@ -651,6 +942,104 @@ class _InlineError extends StatelessWidget {
             label: const Text('重试'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BottomContentActions extends StatelessWidget {
+  const _BottomContentActions({
+    required this.liked,
+    required this.likeCount,
+    required this.commentCount,
+    required this.shareCount,
+    required this.onLike,
+    required this.onComment,
+    required this.onShare,
+  });
+
+  final bool liked;
+  final int likeCount;
+  final int commentCount;
+  final int shareCount;
+  final VoidCallback onLike;
+  final VoidCallback onComment;
+  final VoidCallback onShare;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xF2121416),
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: SizedBox(
+          height: 58,
+          child: Row(
+            children: [
+              _BottomAction(
+                key: const Key('action-like'),
+                icon: liked ? Icons.favorite : Icons.favorite_border,
+                color: liked ? const Color(0xFFFF5A5F) : Colors.white,
+                label: _compactCount(likeCount),
+                tooltip: liked ? '取消点赞' : '点赞',
+                onPressed: onLike,
+              ),
+              _BottomAction(
+                key: const Key('action-comment'),
+                icon: Icons.chat_bubble_outline,
+                label: _compactCount(commentCount),
+                tooltip: '评论',
+                onPressed: onComment,
+              ),
+              _BottomAction(
+                key: const Key('action-share'),
+                icon: Icons.reply_rounded,
+                label: _compactCount(shareCount),
+                tooltip: '转发',
+                onPressed: onShare,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomAction extends StatelessWidget {
+  const _BottomAction({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.onPressed,
+    this.color = Colors.white,
+  });
+
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 24),
+              const SizedBox(width: 7),
+              Text(label, style: const TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
       ),
     );
   }

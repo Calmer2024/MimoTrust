@@ -14,6 +14,7 @@ import '../services/local_interaction_store.dart';
 import '../services/playback_lifecycle_policy.dart';
 import '../widgets/comments_sheet.dart';
 import '../widgets/share_sheet.dart';
+import 'content_preview_page.dart';
 import 'non_video_content_page.dart';
 
 typedef VideoPageBuilder = Widget Function(VideoContent content);
@@ -35,6 +36,9 @@ class VideoContentPage extends StatefulWidget {
 class _VideoContentPageState extends State<VideoContentPage>
     with WidgetsBindingObserver {
   late Future<List<SandboxContent>> _contents;
+  final PageController _feedController = PageController();
+  final Map<String, double> _readingOffsets = <String, double>{};
+  final Map<String, int> _galleryIndexes = <String, int>{};
   int _activeIndex = 0;
   bool _wasBackgrounded = false;
 
@@ -47,9 +51,39 @@ class _VideoContentPageState extends State<VideoContentPage>
 
   void _retry() {
     setState(() {
-      _activeIndex = 0;
       _contents = widget.loadContents();
     });
+  }
+
+  void _restoreActivePage(int itemCount) {
+    final target = _activeIndex.clamp(0, itemCount - 1);
+    _activeIndex = target;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_feedController.hasClients) return;
+      final current = _feedController.page?.round();
+      if (current != target) _feedController.jumpToPage(target);
+    });
+  }
+
+  Future<void> _openDetails(SandboxContent content) async {
+    final contentKey = '${content.id}:${content.version}';
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => NonVideoContentPage(
+          content: content,
+          isActive: true,
+          isDetail: true,
+          initialReadingOffset: _readingOffsets[contentKey] ?? 0,
+          initialGalleryIndex: _galleryIndexes[contentKey] ?? 0,
+          onReadingOffsetChanged: (offset) {
+            _readingOffsets[contentKey] = offset;
+          },
+          onGalleryIndexChanged: (index) {
+            _galleryIndexes[contentKey] = index;
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -66,6 +100,7 @@ class _VideoContentPageState extends State<VideoContentPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _feedController.dispose();
     super.dispose();
   }
 
@@ -86,10 +121,12 @@ class _VideoContentPageState extends State<VideoContentPage>
             return _ContentStatusView.error(onRetry: _retry);
           }
           final contents = snapshot.requireData;
+          _restoreActivePage(contents.length);
           return Stack(
             children: [
               PageView.builder(
                 key: const Key('video-feed'),
+                controller: _feedController,
                 scrollDirection: Axis.vertical,
                 itemCount: contents.length,
                 onPageChanged: (index) {
@@ -107,10 +144,17 @@ class _VideoContentPageState extends State<VideoContentPage>
                           isActive: index == _activeIndex,
                         );
                   }
-                  return NonVideoContentPage(
+                  if (content is AudioContent) {
+                    return NonVideoContentPage(
+                      key: ValueKey('${content.id}:${content.version}'),
+                      content: content,
+                      isActive: index == _activeIndex,
+                    );
+                  }
+                  return ContentPreviewPage(
                     key: ValueKey('${content.id}:${content.version}'),
                     content: content,
-                    isActive: index == _activeIndex,
+                    onOpen: () => _openDetails(content),
                   );
                 },
               ),
