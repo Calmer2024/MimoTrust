@@ -22,3 +22,7 @@ video_info/
 contracts/
 scripts/
 sandbox/tools/
+
+# Build artifacts
+release/*.tar
+release/*.apk
