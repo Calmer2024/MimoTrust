@@ -46,6 +46,7 @@ class JobRuntime:
             client_request_id=request.client_request_id,
             source=request.source,
             mode=request.mode,
+            verification_mode=request.verification_mode,
         )
         job, reused = await self.store.create(job)
         if reused:

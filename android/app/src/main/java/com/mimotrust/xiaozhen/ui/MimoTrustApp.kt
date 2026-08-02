@@ -52,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -128,12 +129,13 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
 @Composable
 private fun ChatScreen(
     jobs: List<JobEntity>,
-    onVerify: (String) -> Unit,
+    onVerify: (String, String) -> Unit,
     onOpen: (JobEntity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
+    var verificationMode by remember { mutableStateOf("speed") }
     val context = LocalContext.current
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -145,7 +147,7 @@ private fun ChatScreen(
     }
     val send = {
         if (input.isNotBlank()) {
-            onVerify(input.trim())
+            onVerify(input.trim(), verificationMode)
             input = ""
             photo = null
         }
@@ -159,9 +161,21 @@ private fun ChatScreen(
         ) {
             item { BrandHeader() }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Hi，今天想核实什么？", fontSize = 29.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black, color = Ink)
                     Text("发来链接或告诉我你看到的内容", fontSize = 14.sp, color = Muted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = verificationMode == "speed",
+                            onClick = { verificationMode = "speed" },
+                            label = { Text("快速") },
+                        )
+                        FilterChip(
+                            selected = verificationMode == "quality",
+                            onClick = { verificationMode = "quality" },
+                            label = { Text("高质量") },
+                        )
+                    }
                 }
             }
             if (jobs.isEmpty()) {
@@ -555,8 +569,25 @@ private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
                     }
                 }
             }
+            job.claimDetails?.let { item { DetailSection("逐主张核验", it) } }
+            job.narrativeAnalysis?.let { item { DetailSection("叙事分析", it) } }
+            job.evidenceGaps?.let { item { DetailSection("待补证据", it) } }
+            job.keyEvidence?.let { item { DetailSection("关键依据", it) } }
             item { Timeline(job) }
             item { Text("AI 辅助核验，仅供信息参考。请结合原始来源与完整语境判断。", color = Muted, fontSize = 12.sp, lineHeight = 18.sp) }
+        }
+    }
+}
+
+@Composable
+private fun DetailSection(title: String, content: String) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, fontWeight = FontWeight.Black, fontSize = 19.sp)
+            Text(content, color = Muted, lineHeight = 21.sp)
         }
     }
 }
@@ -566,10 +597,14 @@ private fun Timeline(job: JobEntity) {
     val stages = listOf(
         "读取链接与内容" to 8,
         "理解文字与画面" to 22,
-        "识别待核实主张" to 42,
-        "检索公开来源" to 66,
-        "交叉比对证据" to 79,
-        "生成核实结论" to 100,
+        "提取核心主张" to 42,
+        "整理并编号主张" to 46,
+        "规划核验与检索" to 54,
+        "并发检索公开来源" to 66,
+        "归一化候选证据" to 72,
+        "筛选证据关系" to 81,
+        "综合研判主张" to 90,
+        "生成完整报告" to 100,
     )
     Card(shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = SurfaceSoft)) {
         Column(Modifier.padding(22.dp)) {

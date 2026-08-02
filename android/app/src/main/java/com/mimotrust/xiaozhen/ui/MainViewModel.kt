@@ -16,9 +16,15 @@ class MainViewModel(private val repository: JobRepository) : ViewModel() {
 
     init { viewModelScope.launch { repository.reconnectActiveJobs() } }
 
-    fun verify(text: String) {
+    fun verify(text: String, verificationMode: String) {
         if (text.isBlank()) return
-        viewModelScope.launch { repository.createSharedJob(text.trim(), UUID.randomUUID().toString()) }
+        viewModelScope.launch {
+            repository.createSharedJob(
+                text.trim(),
+                UUID.randomUUID().toString(),
+                verificationMode,
+            )
+        }
     }
 }
 

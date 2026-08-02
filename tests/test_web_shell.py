@@ -18,7 +18,7 @@ def test_index_prevents_stale_frontend_bundle() -> None:
 
 def test_completed_verification_is_part_of_video_response(monkeypatch) -> None:
     payload = {
-        "protocol_version": "structured-information-v4",
+        "protocol_version": "compact-claims-v2",
         "request_id": "request-one",
         "cached": True,
         "strategy": "metadata",
@@ -30,10 +30,10 @@ def test_completed_verification_is_part_of_video_response(monkeypatch) -> None:
         "summary": "测试摘要",
         "coverage_note": "测试覆盖",
         "structured_data": {
-            "case_id": "test-case",
-            "content_topic": "测试主题",
-            "atomic_claims": ["这是一条用于回归测试的完整中文主张"],
-            "implicit_opinions": [],
+            "主题": "测试主题",
+            "主张": [
+                {"文本": "这是一条用于回归测试的完整中文主张", "表达": "直接"}
+            ],
         },
         "verification": {
             "status": "completed",
@@ -69,12 +69,11 @@ def test_full_pipeline_details_have_one_unified_process_view() -> None:
     assert 'id="trust-audit-body"' in html
     assert html.index('id="trust-audit-body"') > html.index('id="view-process"')
     assert 'id="llm-structured-input"' in html
-    assert "fullPipelineMilliseconds" in script
-    assert "verificationTraceItems" in script
-    assert "orchestrationTraceItems" in script
-    assert "输入解析与安全展开" in script
-    assert "封面获取与转存" in script
-    assert "其他编排开销" in script
+    assert 'fetch("/api/analyze/stream"' in script
+    assert 'verification_mode: $("verification-mode").value' in script
+    assert 'id="narrative-analysis"' in html
+    assert 'id="evidence-gaps"' in html
+    assert 'id="report-json"' in html
     assert "data.full_source_text" in script
     assert 'id="thumbnail-placeholder"' in html
     assert "showThumbnail" in script
@@ -95,8 +94,28 @@ def test_web_shell_uses_one_input_for_links_and_text() -> None:
     assert 'id="upload-files"' not in html
     assert 'id="upload-title"' not in html
     assert 'id="upload-text"' not in html
-    assert 'fetch("/api/analyze/upload"' in script
+    assert 'fetch("/api/analyze/upload/stream"' in script
     assert '<option value="upload">' not in html
     assert "selectInputRoute" in script
     assert 'route.kind === "text"' in script
     assert '$("upload-' not in script
+
+
+def test_android_consumes_and_displays_complete_report_sections() -> None:
+    root = Path("android/app/src/main/java/com/mimotrust/xiaozhen")
+    dto = (root / "data/remote/Dtos.kt").read_text(encoding="utf-8")
+    repository = (root / "data/JobRepository.kt").read_text(encoding="utf-8")
+    entity = (root / "data/local/JobEntity.kt").read_text(encoding="utf-8")
+    database = (root / "data/local/MimoDatabase.kt").read_text(encoding="utf-8")
+    application = (root / "MimoTrustApplication.kt").read_text(encoding="utf-8")
+    ui = (root / "ui/MimoTrustApp.kt").read_text(encoding="utf-8")
+
+    for field in ("claimChecks", "narrativeAnalysis", "evidenceGaps", "evidenceUsed"):
+        assert field in dto
+    for field in ("claimDetails", "narrativeAnalysis", "evidenceGaps", "keyEvidence"):
+        assert field in repository
+        assert field in entity
+        assert f"job.{field}" in ui
+    assert "version = 2" in database
+    assert "MIGRATION_1_2" in database
+    assert ".addMigrations(MimoDatabase.MIGRATION_1_2)" in application

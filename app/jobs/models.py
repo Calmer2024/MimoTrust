@@ -34,6 +34,7 @@ class JobSource(BaseModel):
 class CreateJobRequest(BaseModel):
     source: JobSource
     mode: Literal["auto", "visual"] = "auto"
+    verification_mode: Literal["speed", "quality"] = "speed"
     client_request_id: str = Field(min_length=8, max_length=100)
 
 
@@ -55,6 +56,7 @@ class JobView(BaseModel):
     client_request_id: str
     source: JobSource
     mode: Literal["auto", "visual"] = "auto"
+    verification_mode: Literal["speed", "quality"] = "speed"
     status: JobStatus = "queued"
     stage: JobStage = "queued"
     display_text: str = "小真已接收，等待开始核验"

@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint, select
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -80,6 +80,7 @@ class JobRow(Base):
     source_value: Mapped[str] = mapped_column(Text)
     platform_hint: Mapped[str | None] = mapped_column(String(50), nullable=True)
     mode: Mapped[str] = mapped_column(String(10))
+    verification_mode: Mapped[str] = mapped_column(String(10), default="speed")
     status: Mapped[str] = mapped_column(String(20), index=True)
     stage: Mapped[str] = mapped_column(String(30))
     display_text: Mapped[str] = mapped_column(String(240))
@@ -103,6 +104,7 @@ def _to_view(row: JobRow) -> JobView:
         client_request_id=row.client_request_id,
         source=JobSource(type=row.source_type, value=row.source_value, platform_hint=row.platform_hint),
         mode=row.mode,
+        verification_mode=row.verification_mode,
         status=row.status,
         stage=row.stage,
         display_text=row.display_text,
@@ -128,6 +130,20 @@ class SqlJobStore(JobStore):
     async def initialize(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            columns = await connection.run_sync(
+                lambda sync_connection: {
+                    item["name"]
+                    for item in inspect(sync_connection).get_columns(
+                        JobRow.__tablename__
+                    )
+                }
+            )
+            if "verification_mode" not in columns:
+                await connection.execute(text(
+                    "ALTER TABLE verification_jobs "
+                    "ADD COLUMN verification_mode VARCHAR(10) "
+                    "NOT NULL DEFAULT 'speed'"
+                ))
 
     async def create(self, job: JobView) -> tuple[JobView, bool]:
         async with self.sessions() as session:
@@ -139,6 +155,7 @@ class SqlJobStore(JobStore):
                 client_request_id=job.client_request_id,
                 source_type=job.source.type, source_value=job.source.value,
                 platform_hint=job.source.platform_hint, mode=job.mode,
+                verification_mode=job.verification_mode,
                 status=job.status, stage=job.stage, display_text=job.display_text,
                 progress_hint=job.progress_hint, sequence=job.sequence,
                 elapsed_ms=job.elapsed_ms, cancel_requested=False,

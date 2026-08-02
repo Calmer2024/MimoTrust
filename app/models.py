@@ -27,6 +27,7 @@ class AnalyzeRequest(BaseModel):
     url: str = Field(min_length=1, max_length=10_000)
     input_kind: Literal["auto", "article", "platform"] = "auto"
     mode: Literal["auto", "visual"] = "auto"
+    verification_mode: Literal["speed", "quality"] = "speed"
     refresh: bool = False
     verify: bool = True
 
@@ -51,25 +52,38 @@ class StageTiming(BaseModel):
     milliseconds: int
 
 
-class StructuredInformation(BaseModel):
-    """Strict downstream information-extraction contract."""
+class ExtractedClaim(BaseModel):
+    """One self-contained claim emitted by the extraction model."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    case_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-    content_topic: str = Field(alias="内容主题", min_length=1, max_length=200)
-    atomic_claims: list[StructuredSentence] = Field(alias="原子主张")
-    implicit_opinions: list[StructuredSentence] = Field(alias="隐性观点")
+    text: StructuredSentence = Field(alias="文本")
+    expression: Literal["直接", "转述", "隐含"] = Field(alias="表达")
 
-    @field_validator("atomic_claims", "implicit_opinions", mode="before")
+
+class StructuredInformation(BaseModel):
+    """Native compact-claim input contract for the verification pipeline."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    topic: str = Field(alias="主题", min_length=1, max_length=200)
+    claims: list[ExtractedClaim] = Field(alias="主张")
+
+    @field_validator("claims", mode="before")
     @classmethod
     def normalize_items(cls, value: object) -> object:
         if not isinstance(value, list):
             return value
         normalized: list[object] = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         for item in value:
-            identity = str(item).strip()
+            if isinstance(item, dict):
+                identity = (
+                    str(item.get("文本") or item.get("text") or "").strip(),
+                    str(item.get("表达") or item.get("expression") or "").strip(),
+                )
+            else:
+                identity = (str(item).strip(), "")
             if identity in seen:
                 continue
             seen.add(identity)
@@ -79,6 +93,7 @@ class StructuredInformation(BaseModel):
 
 class VerifyRequest(BaseModel):
     structured_data: StructuredInformation
+    verification_mode: Literal["speed", "quality"] = "speed"
     cache_key: str | None = Field(
         default=None,
         pattern=r"^[a-f0-9]{64}$",
@@ -142,7 +157,7 @@ class CoverageInfo(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
-    protocol_version: Literal["structured-information-v4"] = "structured-information-v4"
+    protocol_version: Literal["compact-claims-v2"] = "compact-claims-v2"
     request_id: str
     cached: bool
     strategy: Literal["subtitle", "asr", "visual", "hybrid", "metadata"]
@@ -171,10 +186,8 @@ class AnalyzeResponse(BaseModel):
     keyframes: list[KeyframeEvidence] = Field(default_factory=list)
     structured_data: StructuredInformation = Field(
         default_factory=lambda: StructuredInformation(
-            case_id="unstructured",
-            content_topic="未识别内容主题",
-            atomic_claims=[],
-            implicit_opinions=[],
+            topic="未识别内容主题",
+            claims=[],
         )
     )
     extraction_plan: ExtractionPlan = Field(default_factory=ExtractionPlan)

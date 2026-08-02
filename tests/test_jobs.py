@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -83,6 +84,29 @@ def test_sql_job_store_persists_status(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_sql_job_store_upgrades_existing_table_with_verification_mode(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy-jobs.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE verification_jobs (job_id VARCHAR(36) PRIMARY KEY)"
+        )
+
+    async def scenario() -> None:
+        store = SqlJobStore(f"sqlite+aiosqlite:///{database_path}")
+        await store.initialize()
+        await store.engine.dispose()
+
+    asyncio.run(scenario())
+
+    with sqlite3.connect(database_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(verification_jobs)")
+        }
+    assert "verification_mode" in columns
+
+
 def test_create_job_api_returns_async_contract(monkeypatch) -> None:
     from app.jobs import api as jobs_api
     from app.main import app
@@ -94,7 +118,10 @@ def test_create_job_api_returns_async_contract(monkeypatch) -> None:
         source=JobSource(value="https://example.com/video"),
     )
 
+    captured = {}
+
     async def fake_create(_request, _device_id):
+        captured["verification_mode"] = _request.verification_mode
         return job, False
 
     monkeypatch.setattr(jobs_api.runtime, "create", fake_create)
@@ -103,8 +130,10 @@ def test_create_job_api_returns_async_contract(monkeypatch) -> None:
         headers={"X-Device-Id": "phone-one"},
         json={
             "source": {"type": "shared_url", "value": "https://example.com/video"},
+            "verification_mode": "quality",
             "client_request_id": "request-api-1",
         },
     )
     assert response.status_code == 202
     assert response.json()["event_url"] == "/v1/jobs/job-api/events"
+    assert captured["verification_mode"] == "quality"

@@ -11,10 +11,14 @@ from app.models import AnalyzeRequest, AnalyzeResponse
 
 
 STAGE_DETAILS = {
-    "search_plan": ("evidence_retrieval", "正在制定多源检索计划", 52),
-    "retrieval": ("evidence_retrieval", "正在检索并读取公开来源", 66),
-    "evidence_triage": ("evidence_triage", "正在核对来源身份与证据直接性", 79),
-    "report_generation": ("report_generating", "正在汇总结论与不确定项", 91),
+    "M1 输入规范化与稳定编号": ("claim_structuring", "正在整理并编号待核验主张", 46),
+    "M2 检索规划与核验需求": ("evidence_retrieval", "正在制定检索与核验计划", 54),
+    "M3 并发检索执行": ("evidence_retrieval", "正在并发检索公开来源", 66),
+    "M4 证据池归一化": ("evidence_retrieval", "正在合并与去重候选证据", 72),
+    "M5 并发证据初筛": ("evidence_triage", "正在核对证据关系与独立性", 81),
+    "M6 最终研判": ("report_generating", "正在综合研判全部主张", 90),
+    "M6 输出未完成，复用现有证据重试": ("report_generating", "研判输出未完成，正在复用证据重试", 92),
+    "M7 报告渲染": ("report_generating", "正在生成完整核验报告", 96),
 }
 
 
@@ -95,7 +99,7 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
         await ensure_not_cancelled()
         await runtime.emit(
             job_id, "claim_structuring", "running",
-            f"已识别 {len(result.structured_data.atomic_claims)} 条待核验主张",
+            f"已识别 {len(result.structured_data.claims)} 条待核验主张",
             42, elapsed_ms=elapsed(),
         )
 
@@ -106,7 +110,12 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
                 await runtime.emit(job_id, mapped[0], "running", mapped[1], mapped[2], elapsed_ms=elapsed())
 
         from app.trust.service import verify_structured_information
-        result.verification = await verify_structured_information(result.structured_data, stage_callback=on_stage)
+        result.verification = await verify_structured_information(
+            result.structured_data,
+            job.verification_mode,
+            source_url=result.metadata.webpage_url,
+            progress=on_stage,
+        )
         result.full_pipeline_milliseconds = max(result.full_pipeline_milliseconds, elapsed())
         completed_at = utc_now()
         card = build_mobile_card(job_id, result, completed_at)

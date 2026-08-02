@@ -8,8 +8,6 @@ from app.mimo import (
     MimoError,
     STRUCTURED_INFORMATION_SCHEMA,
     _parse_json_content,
-    _recommended_claim_density,
-    _structured_quality_issues,
     _validate_structured_result,
     structure_information,
 )
@@ -119,13 +117,11 @@ def test_empty_asr_chunk_does_not_report_full_audio_coverage(monkeypatch) -> Non
 
 def test_structured_reading_result_normalizes_summary_punctuation() -> None:
     structured = StructuredInformation(
-        case_id="punctuation-case",
-        content_topic="这是内容主题。",
-        atomic_claims=[
-            "敌敌畏经皮肤吸收可导致人体有机磷中毒。",
-            "某项法规禁止在食品中使用该化学成分！",
+        topic="这是内容主题。",
+        claims=[
+            {"文本": "敌敌畏经皮肤吸收可导致人体有机磷中毒。", "表达": "直接"},
+            {"文本": "某项法规禁止在食品中使用该化学成分！", "表达": "转述"},
         ],
-        implicit_opinions=[],
     )
 
     summary, _, _ = _structured_reading_result(structured)
@@ -312,7 +308,7 @@ def test_cache_key_includes_pipeline_version(monkeypatch) -> None:
     monkeypatch.setattr(ResultCache, "PIPELINE_VERSION", "next-pipeline")
     after = ResultCache.key("https://example.com/video", "auto")
 
-    assert original == "atomic-claims-only-v1"
+    assert original == "m1-m7-v1"
     assert before != after
 
 
@@ -351,176 +347,99 @@ def test_bilibili_prefers_platform_backup_cdn(monkeypatch) -> None:
 def test_structured_information_uses_exact_downstream_keys() -> None:
     structured = StructuredInformation.model_validate(
         {
-            "case_id": "watermelon-seed-rumor",
-            "内容主题": "无籽西瓜食品安全谣言核验",
-            "原子主张": ["家长尽量不要给孩子吃无籽西瓜"],
-            "隐性观点": ["人工培育的农作物不安全"],
+            "主题": "无籽西瓜食品安全谣言核验",
+            "主张": [
+                {"文本": "家长尽量不要给孩子吃无籽西瓜", "表达": "直接"},
+                {"文本": "人工培育的农作物不安全", "表达": "隐含"},
+            ],
         }
     )
+
     dumped = structured.model_dump(by_alias=True)
-    assert set(dumped) == {
-        "case_id",
-        "内容主题",
-        "原子主张",
-        "隐性观点",
-    }
-    assert "claims" not in dumped
+    assert set(dumped) == {"主题", "主张"}
+    assert dumped["主张"][1]["表达"] == "隐含"
 
 
-def test_structured_information_schema_enforces_item_quality_without_count_caps() -> None:
+def test_structured_information_schema_enforces_claim_shape_without_count_cap() -> None:
     properties = STRUCTURED_INFORMATION_SCHEMA["properties"]
-    for name in ("原子主张", "隐性观点"):
-        assert "maxItems" not in properties[name]
-        assert properties[name]["items"]["minLength"] >= 8
-        assert "\\u4e00" in properties[name]["items"]["pattern"]
+    assert set(properties) == {"主题", "主张"}
+    assert "maxItems" not in properties["主张"]
+    claim_schema = properties["主张"]["items"]
+    assert claim_schema["required"] == ["文本", "表达"]
+    assert claim_schema["properties"]["表达"]["enum"] == ["直接", "转述", "隐含"]
+    assert claim_schema["properties"]["文本"]["minLength"] >= 8
 
 
-def test_structured_information_does_not_keyword_filter_semantics() -> None:
+def test_structured_information_preserves_model_semantics_and_deduplicates_exact_rows() -> None:
     structured = StructuredInformation.model_validate(
         {
-            "case_id": "strict-filter-case",
-            "内容主题": "敌敌畏接触事故",
-            "原子主张": [
-                "加强监管很重要并且需要持续推进",
-            ],
-            "隐性观点": [
-                "记者认为事故需要引起重视",
+            "主题": "敌敌畏接触事故",
+            "主张": [
+                {"文本": "加强监管很重要并且需要持续推进", "表达": "直接"},
+                {"文本": "记者认为事故需要引起重视", "表达": "隐含"},
+                {"文本": "记者认为事故需要引起重视", "表达": "隐含"},
             ],
         }
     )
 
-    assert structured.atomic_claims == ["加强监管很重要并且需要持续推进"]
-    assert structured.implicit_opinions == ["记者认为事故需要引起重视"]
+    assert [item.text for item in structured.claims] == [
+        "加强监管很重要并且需要持续推进",
+        "记者认为事故需要引起重视",
+    ]
 
 
-def test_structural_normalization_preserves_model_content() -> None:
+def test_structural_validation_preserves_native_model_content() -> None:
     result = _validate_structured_result(
         {
-            "case_id": "黎明-糖丸-筹款-疫苗",
-            "内容主题": "黎明为儿童糖丸疫苗筹款的传闻核实",
-            "原子主张": [
-                "黎明在慈善晚宴通过危险表演为疫苗项目筹集善款",
-                "相关善款用于采购疫苗并让中国儿童免费获得糖丸疫苗",
+            "主题": "黎明为儿童糖丸疫苗筹款的传闻核实",
+            "主张": [
+                {
+                    "文本": "黎明在慈善晚宴通过危险表演为疫苗项目筹集善款",
+                    "表达": "转述",
+                },
+                {
+                    "文本": "相关善款用于采购疫苗并让中国儿童免费获得糖丸疫苗",
+                    "表达": "直接",
+                },
             ],
         }
     )
 
-    assert result["case_id"].startswith("case-")
-    assert "新闻事实" not in result
-    assert result["隐性观点"] == []
+    assert set(result) == {"主题", "主张"}
+    assert result["主张"][0]["表达"] == "转述"
 
 
 def test_pipeline_ignores_model_usage_metadata_when_validating_protocol() -> None:
     structured = _structured_information_from_model_result(
         {
-            "case_id": "li-ming-polio-vaccine",
-            "内容主题": "黎明为内地儿童筹集疫苗善款的传闻",
-            "原子主张": ["黎明筹集善款购买了小儿麻痹症疫苗"],
-            "隐性观点": [],
+            "主题": "黎明为内地儿童筹集疫苗善款的传闻",
+            "主张": [
+                {"文本": "黎明筹集善款购买了小儿麻痹症疫苗", "表达": "转述"}
+            ],
             "_usage": {"prompt_tokens": 100, "completion_tokens": 50},
         }
     )
 
-    assert structured.case_id == "li-ming-polio-vaccine"
-    assert structured.atomic_claims == ["黎明筹集善款购买了小儿麻痹症疫苗"]
+    assert structured.topic == "黎明为内地儿童筹集疫苗善款的传闻"
+    assert structured.claims[0].text == "黎明筹集善款购买了小儿麻痹症疫苗"
 
 
-def test_structured_protocol_accepts_all_grounded_items_without_count_caps() -> None:
+def test_structured_protocol_accepts_many_grounded_items_without_count_cap() -> None:
     payload = {
-        "case_id": "multi-event-case",
-        "内容主题": "包含多项独立主张、事实和观点的综合内容",
-        "原子主张": [
-            f"这是需要独立核验的第{index}项具体原子主张"
-            for index in range(1, 6)
-        ],
-        "隐性观点": [
-            f"这是根据完整上下文识别的第{index}项隐性观点"
-            for index in range(1, 5)
+        "主题": "包含多项独立主张、事实和观点的综合内容",
+        "主张": [
+            {
+                "文本": f"这是需要独立核验的第{index}项具体核心主张",
+                "表达": "直接" if index % 2 else "转述",
+            }
+            for index in range(1, 10)
         ],
     }
 
     structured = StructuredInformation.model_validate(payload)
 
-    assert len(structured.atomic_claims) == 5
-    assert len(structured.implicit_opinions) == 4
-    for field in ("原子主张", "隐性观点"):
-        assert "maxItems" not in STRUCTURED_INFORMATION_SCHEMA["properties"][field]
-
-
-def test_structured_quality_gate_detects_fragmented_enumeration() -> None:
-    issues = _structured_quality_issues(
-        {
-            "原子主张": [
-                "黎明为筹款举办了近百场演唱会",
-                "黎明最终筹措到三百五十万美元",
-                "黎明完成了相关慈善筹款活动",
-                "这笔善款全部用于采购疫苗",
-                "疫苗让大量儿童获得免费接种",
-            ],
-            "隐性观点": [],
-        }
-    )
-
-    assert issues
-    assert any("流水账" in issue or "代词" in issue for issue in issues)
-
-
-def test_structured_quality_gate_detects_cross_claim_number_duplication() -> None:
-    issues = _structured_quality_issues(
-        {
-            "原子主张": [
-                "某人在一场活动中筹集到350万美元善款",
-                "某人将筹集到的350万美元用于采购医疗物资",
-            ],
-            "隐性观点": [],
-        }
-    )
-
-    assert any("重复同一关键数字" in issue for issue in issues)
-
-
-def test_structured_quality_gate_rejects_ironic_stance_as_atomic_claim() -> None:
-    issues = _structured_quality_issues({
-        "原子主张": [
-            "说话者通过反问和夸张质疑高频献血行为，其真实立场并非字面崇拜"
-        ],
-        "隐性观点": [],
-    })
-
-    assert any("隐性观点" in issue for issue in issues)
-
-
-def test_structured_quality_gate_allows_many_independent_complete_claims() -> None:
-    issues = _structured_quality_issues(
-        {
-            "原子主张": [
-                "卫生机构发布了疫苗有效性的独立调查结论",
-                "监管部门公布了食品添加剂的最新限量标准",
-                "大学团队测量了当地地下水中的重金属浓度",
-                "气象部门记录了沿海地区的极端降雨数据",
-                "法院判决确认涉案企业承担相应民事责任",
-                "研究人员报告新材料在高温环境下保持稳定",
-            ],
-            "隐性观点": [],
-        }
-    )
-
-    assert issues == []
-
-
-def test_claim_density_is_adaptive_and_never_a_fixed_global_cap() -> None:
-    assert _recommended_claim_density(
-        "短视频口播内容",
-        {"duration_seconds": 85, "image_count": 0},
-    ) == 2
-    assert _recommended_claim_density(
-        "长篇内容" * 3000,
-        {"duration_seconds": 1800, "image_count": 0},
-    ) >= 6
-    assert _recommended_claim_density(
-        "图文内容",
-        {"duration_seconds": 0, "image_count": 24},
-    ) == 8
+    assert len(structured.claims) == 9
+    assert "maxItems" not in STRUCTURED_INFORMATION_SCHEMA["properties"]["主张"]
 
 
 def test_spoken_text_short_circuits_visual_fallback() -> None:
@@ -620,7 +539,7 @@ def test_parse_douyin_note_embedded_payload() -> None:
 
 def test_malformed_json_is_wrapped_as_mimo_error() -> None:
     try:
-        _parse_json_content('{"内容主题":"测试","原子主张":["主张",]}')
+        _parse_json_content('{"主题":"测试","主张":[{"文本":"主张",}]}')
     except MimoError:
         pass
     else:
@@ -637,12 +556,7 @@ def test_structured_information_json_is_repaired_once(monkeypatch) -> None:
                 "choices": [
                     {
                         "finish_reason": "length",
-                        "message": {
-                            "content": (
-                                '{"case_id":"test-case","内容主题":"截断",'
-                                '"原子主张":['
-                            )
-                        },
+                        "message": {"content": '{"主题":"截断","主张":['},
                     }
                 ]
             }
@@ -653,10 +567,13 @@ def test_structured_information_json_is_repaired_once(monkeypatch) -> None:
                     "message": {
                         "content": json.dumps(
                             {
-                                "case_id": "test-case",
-                                "内容主题": "已修复",
-                                "原子主张": ["敌敌畏接触皮肤可能导致人体中毒"],
-                                "隐性观点": [],
+                                "主题": "已修复",
+                                "主张": [
+                                    {
+                                        "文本": "敌敌畏接触皮肤可能导致人体中毒",
+                                        "表达": "直接",
+                                    }
+                                ],
                             },
                             ensure_ascii=False,
                         )
@@ -668,14 +585,14 @@ def test_structured_information_json_is_repaired_once(monkeypatch) -> None:
 
     monkeypatch.setattr("app.mimo._completion", fake_completion)
     result = asyncio.run(structure_information("输入", {"title": "标题"}))
-    assert result["内容主题"] == "已修复"
+    assert result["主题"] == "已修复"
     assert len(calls) == 2
     assert calls[0]["response_format"]["type"] == "json_schema"
     assert calls[1]["response_format"]["type"] == "json_schema"
     assert calls[0]["response_format"]["json_schema"]["strict"] is True
 
 
-def test_structuring_prompt_preserves_full_input_and_requires_irony_analysis(
+def test_structuring_prompt_uses_native_claim_protocol_and_irony_rules(
     monkeypatch,
 ) -> None:
     calls = []
@@ -691,110 +608,67 @@ def test_structuring_prompt_preserves_full_input_and_requires_irony_analysis(
             "choices": [{
                 "finish_reason": "stop",
                 "message": {"content": json.dumps({
-                    "case_id": "irony-case",
-                    "内容主题": "高频献血行为评论",
-                    "原子主张": ["视频质疑高频献血行为是否符合相关法律规范"],
-                    "隐性观点": ["发布者借字面赞扬反讽高频献血行为"],
+                    "主题": "高频献血行为评论",
+                    "主张": [
+                        {
+                            "文本": "发布者暗示高频献血行为可能违反献血规定",
+                            "表达": "隐含",
+                        }
+                    ],
                 }, ensure_ascii=False)},
             }],
             "usage": {"completion_tokens": 20},
         }
 
     monkeypatch.setattr("app.mimo._completion", fake_completion)
-    asyncio.run(structure_information(source, {"title": "#脱口秀 #幽默"}))
+    result = asyncio.run(
+        structure_information(source, {"title": "#脱口秀 #幽默"})
+    )
 
     prompt = calls[0]["messages"][1]["content"]
     assert source in prompt
     assert "反讽" in prompt
-    assert "字面" in prompt
-    assert "标题" in prompt and "话题标签" in prompt
+    assert "刷履历" in prompt
+    assert '"主题"' in prompt and '"主张"' in prompt
+    assert "原子主张" not in result
+    assert result["主张"][0]["表达"] == "隐含"
+    assert len(calls) == 1
 
 
-def test_semantic_recompression_only_replaces_a_strictly_better_result(
+def test_structuring_prompt_skips_pure_entertainment_but_keeps_real_world_claims(
     monkeypatch,
 ) -> None:
-    fragmented = {
-        "case_id": "fundraising-case",
-        "内容主题": "原始主题内容",
-        "原子主张": [
-            "某人通过多场活动开展筹款",
-            "某人最终筹集到一笔大额善款",
-            "某人完成了这次公益筹款活动",
-            "这笔善款被用于采购相关物资",
-            "相关物资最终送达受助人群",
-        ],
-        "隐性观点": [],
-    }
-    still_fragmented = {
-        **fragmented,
-        "内容主题": "不应采用的重压缩结果",
-    }
-    responses = [fragmented, still_fragmented]
+    calls = []
+    source = (
+        "[发布上下文]\n标题：为什么说朵拉才是智斗界的神？\n"
+        "[语音/字幕]\n接下来解析《权谋智斗大师朵拉》做的那些局。"
+    )
 
     async def fake_completion(payload, timeout=120):
-        content = responses.pop(0)
+        calls.append(payload)
         return {
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "message": {
-                        "content": json.dumps(content, ensure_ascii=False),
-                    },
-                }
-            ],
-            "usage": {"completion_tokens": 20},
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": json.dumps({
+                    "主题": "对儿童动画角色的权谋化娱乐解读",
+                    "主张": [],
+                }, ensure_ascii=False)},
+            }],
+            "usage": {"completion_tokens": 16},
         }
 
     monkeypatch.setattr("app.mimo._completion", fake_completion)
-    result = asyncio.run(structure_information("输入证据", {"title": "标题"}))
+    result = asyncio.run(structure_information(source, {"title": "朵拉权谋解读"}))
 
-    assert result["内容主题"] == "原始主题内容"
-
-
-def test_semantic_recompression_accepts_compact_self_contained_result(
-    monkeypatch,
-) -> None:
-    fragmented = {
-        "case_id": "fundraising-case",
-        "内容主题": "原始主题内容",
-        "原子主张": [
-            "某人通过多场活动开展筹款",
-            "某人最终筹集到一笔大额善款",
-            "某人完成了这次公益筹款活动",
-            "这笔善款被用于采购相关物资",
-            "相关物资最终送达受助人群",
-        ],
-        "隐性观点": [],
-    }
-    compact = {
-        "case_id": "fundraising-case",
-        "内容主题": "采用的紧凑主题内容",
-        "原子主张": [
-            "某人通过多场活动筹集大额善款，并将善款用于采购和发放相关物资"
-        ],
-        "隐性观点": [],
-    }
-    responses = [fragmented, compact]
-
-    async def fake_completion(payload, timeout=120):
-        content = responses.pop(0)
-        return {
-            "choices": [
-                {
-                    "finish_reason": "stop",
-                    "message": {
-                        "content": json.dumps(content, ensure_ascii=False),
-                    },
-                }
-            ],
-            "usage": {"completion_tokens": 20},
-        }
-
-    monkeypatch.setattr("app.mimo._completion", fake_completion)
-    result = asyncio.run(structure_information("输入证据", {"title": "标题"}))
-
-    assert result["内容主题"] == "采用的紧凑主题内容"
-    assert len(result["原子主张"]) == 1
+    prompt = calls[0]["messages"][1]["content"]
+    assert "纯娱乐内容" in prompt
+    assert "主张\": []" in prompt
+    assert "虚构剧情" in prompt
+    assert "粉丝理论" in prompt
+    assert "现实世界" in prompt
+    assert "不能因为语气幽默" in prompt
+    assert "视频声称" in prompt
+    assert result["主张"] == []
 
 
 def test_local_structured_fallback_is_valid_and_deduplicated() -> None:
@@ -806,6 +680,5 @@ def test_local_structured_fallback_is_valid_and_deduplicated() -> None:
         title="产品发布消息",
         webpage_url="https://www.example.com/video/1",
     )
-    assert result.content_topic == "产品发布消息"
-    assert result.atomic_claims == []
-    assert result.implicit_opinions == []
+    assert result.topic == "产品发布消息"
+    assert result.claims == []

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from inspect import isawaitable
 from pathlib import Path
+from typing import Awaitable, Callable, Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.cache import ResultCache
@@ -29,13 +32,16 @@ from app.pipeline import (
 from app.content import analyze_article_url, analyze_upload_bundle
 from app.security import ALLOWED_HOST_SUFFIXES, UnsafeUrlError, resolve_content_input
 from app.thumbnails import thumbnail_store
-from app.trust.service import verify_structured_information
+from app.trust.service import (
+    hydrate_cached_verification,
+    verify_structured_information,
+)
 from app.jobs.api import router as jobs_router
 
 
 app = FastAPI(
     title="MiMo Trust Multimodal Source Verification",
-    version="0.5.0",
+    version="0.6.0",
     docs_url="/api/docs",
 )
 cache = ResultCache(settings.cache_ttl_seconds)
@@ -161,6 +167,9 @@ def _ensure_cleaned_article(payload: dict[str, object]) -> dict[str, object]:
         structured = StructuredInformation.model_validate(structured_payload)
         summary, _, _ = _structured_reading_result(structured)
         payload["summary"] = summary
+    verification = payload.get("verification")
+    if isinstance(verification, dict):
+        payload["verification"] = hydrate_cached_verification(verification)
     return payload
 
 
@@ -183,7 +192,7 @@ async def health() -> dict[str, object]:
         "accepted_inputs": [
             "文章 URL", "平台链接/分享文本", "无有效链接时自动组合文本+图片+音频+视频"
         ],
-        "extraction_protocol": "structured-information-v4",
+        "extraction_protocol": "compact-claims-v2",
         "job_mode": settings.job_mode,
         "mobile_job_api": "/v1/jobs",
     }
@@ -200,9 +209,19 @@ async def thumbnail(key: str) -> FileResponse:
     )
 
 
-@app.post("/api/analyze", response_model=AnalyzeResponse)
-async def analyze_content(request: AnalyzeRequest) -> AnalyzeResponse:
+async def _execute_analysis(
+    request: AnalyzeRequest,
+    progress: Callable[[str], None | Awaitable[None]] | None = None,
+) -> AnalyzeResponse:
+    async def emit(message: str) -> None:
+        if progress is None:
+            return
+        result = progress(message)
+        if isawaitable(result):
+            await result
+
     request_started = time.perf_counter()
+    await emit("正在解析并安全展开输入")
     input_started = time.perf_counter()
     try:
         url = await asyncio.to_thread(
@@ -218,16 +237,26 @@ async def analyze_content(request: AnalyzeRequest) -> AnalyzeResponse:
     if not request.refresh:
         cached = cache.get(cache_key)
         if cached:
+            await emit("命中内容缓存，正在恢复完整结果")
             cached["cached"] = True
             _ensure_cleaned_article(cached)
             cached_result = AnalyzeResponse.model_validate(cached)
             _ensure_request_timings(cached_result)
             thumbnail_changed = await _stabilize_result_thumbnail(cached_result)
             verification_added = False
-            if request.verify and not cached_result.verification:
+            cached_verification_mode = str(
+                (cached_result.verification or {}).get("verification_mode") or ""
+            )
+            if request.verify and (
+                not cached_result.verification
+                or cached_verification_mode != request.verification_mode
+            ):
                 try:
                     cached_result.verification = await verify_structured_information(
-                        cached_result.structured_data
+                        cached_result.structured_data,
+                        request.verification_mode,
+                        source_url=cached_result.metadata.webpage_url,
+                        progress=progress,
                     )
                     verification_added = True
                 except Exception as exc:
@@ -263,6 +292,7 @@ async def analyze_content(request: AnalyzeRequest) -> AnalyzeResponse:
             return cached_result
 
     try:
+        await emit("正在提取内容并生成核心主张")
         hostname = (urlparse(url).hostname or "").lower()
         is_platform = any(
             hostname == suffix or hostname.endswith(f".{suffix}")
@@ -291,7 +321,10 @@ async def analyze_content(request: AnalyzeRequest) -> AnalyzeResponse:
     if request.verify:
         try:
             result.verification = await verify_structured_information(
-                result.structured_data
+                result.structured_data,
+                request.verification_mode,
+                source_url=result.metadata.webpage_url,
+                progress=progress,
             )
         except Exception as exc:
             result.verification = {
@@ -310,14 +343,80 @@ async def analyze_content(request: AnalyzeRequest) -> AnalyzeResponse:
     return result
 
 
-@app.post("/api/analyze/upload", response_model=AnalyzeResponse)
-async def analyze_uploaded_content(
-    title: str = Form(default="多模态组合核验", max_length=200),
-    text: str = Form(default="", max_length=50_000),
-    files: list[UploadFile] = File(default=[]),
-    verify: bool = Form(default=True),
+@app.post("/api/analyze", response_model=AnalyzeResponse)
+async def analyze_content(request: AnalyzeRequest) -> AnalyzeResponse:
+    return await _execute_analysis(request)
+
+
+def _sse(event: str, payload: dict[str, object]) -> str:
+    return (
+        f"event: {event}\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    )
+
+
+@app.post("/api/analyze/stream")
+async def analyze_content_stream(request: AnalyzeRequest) -> StreamingResponse:
+    async def events():
+        queue: asyncio.Queue[tuple[str, dict[str, object]]] = asyncio.Queue()
+
+        async def emit(message: str) -> None:
+            await queue.put(("progress", {"type": "progress", "message": message}))
+
+        async def worker() -> None:
+            try:
+                result = await _execute_analysis(request, emit)
+                await queue.put(("result", {
+                    "type": "result",
+                    "data": result.model_dump(mode="json", by_alias=True),
+                }))
+            except HTTPException as exc:
+                await queue.put(("error", {
+                    "type": "error",
+                    "message": str(exc.detail),
+                }))
+            except Exception as exc:
+                await queue.put(("error", {
+                    "type": "error",
+                    "message": str(exc),
+                }))
+
+        task = asyncio.create_task(worker())
+        try:
+            while True:
+                event, payload = await queue.get()
+                yield _sse(event, payload)
+                if event in {"result", "error"}:
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _execute_uploaded_analysis(
+    title: str,
+    text: str,
+    files: list[UploadFile],
+    verify: bool,
+    verification_mode: Literal["speed", "quality"],
+    progress: Callable[[str], None | Awaitable[None]] | None = None,
 ) -> AnalyzeResponse:
+    async def emit(message: str) -> None:
+        if progress is None:
+            return
+        result = progress(message)
+        if isawaitable(result):
+            await result
+
     request_started = time.perf_counter()
+    await emit("正在理解上传材料并提取核心主张")
     try:
         result = await analyze_upload_bundle(title.strip(), text, files)
     except PipelineError as exc:
@@ -334,7 +433,10 @@ async def analyze_uploaded_content(
     if verify:
         try:
             result.verification = await verify_structured_information(
-                result.structured_data
+                result.structured_data,
+                verification_mode,
+                source_url=result.metadata.webpage_url,
+                progress=progress,
             )
         except Exception as exc:
             result.verification = {"status": "failed", "message": str(exc)}
@@ -349,10 +451,79 @@ async def analyze_uploaded_content(
     return result
 
 
+@app.post("/api/analyze/upload", response_model=AnalyzeResponse)
+async def analyze_uploaded_content(
+    title: str = Form(default="多模态组合核验", max_length=200),
+    text: str = Form(default="", max_length=50_000),
+    files: list[UploadFile] = File(default=[]),
+    verify: bool = Form(default=True),
+    verification_mode: Literal["speed", "quality"] = Form(default="speed"),
+) -> AnalyzeResponse:
+    return await _execute_uploaded_analysis(
+        title, text, files, verify, verification_mode
+    )
+
+
+@app.post("/api/analyze/upload/stream")
+async def analyze_uploaded_content_stream(
+    title: str = Form(default="多模态组合核验", max_length=200),
+    text: str = Form(default="", max_length=50_000),
+    files: list[UploadFile] = File(default=[]),
+    verify: bool = Form(default=True),
+    verification_mode: Literal["speed", "quality"] = Form(default="speed"),
+) -> StreamingResponse:
+    async def events():
+        queue: asyncio.Queue[tuple[str, dict[str, object]]] = asyncio.Queue()
+
+        async def emit(message: str) -> None:
+            await queue.put(("progress", {"type": "progress", "message": message}))
+
+        async def worker() -> None:
+            try:
+                result = await _execute_uploaded_analysis(
+                    title, text, files, verify, verification_mode, emit
+                )
+                await queue.put(("result", {
+                    "type": "result",
+                    "data": result.model_dump(mode="json", by_alias=True),
+                }))
+            except HTTPException as exc:
+                await queue.put(("error", {
+                    "type": "error",
+                    "message": str(exc.detail),
+                }))
+            except Exception as exc:
+                await queue.put(("error", {
+                    "type": "error",
+                    "message": str(exc),
+                }))
+
+        task = asyncio.create_task(worker())
+        try:
+            while True:
+                event, payload = await queue.get()
+                yield _sse(event, payload)
+                if event in {"result", "error"}:
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/api/verify")
 async def verify_claims(request: VerifyRequest) -> dict[str, object]:
     try:
-        result = await verify_structured_information(request.structured_data)
+        result = await verify_structured_information(
+            request.structured_data,
+            request.verification_mode,
+        )
         if request.cache_key:
             cached = cache.get(request.cache_key)
             if not cached:
@@ -360,7 +531,7 @@ async def verify_claims(request: VerifyRequest) -> dict[str, object]:
             cached_structured = StructuredInformation.model_validate(
                 cached.get("structured_data", {})
             )
-            if cached_structured.case_id != request.structured_data.case_id:
+            if cached_structured != request.structured_data:
                 raise HTTPException(status_code=409, detail="核验案例与缓存记录不匹配")
             cached["verification"] = result
             try:

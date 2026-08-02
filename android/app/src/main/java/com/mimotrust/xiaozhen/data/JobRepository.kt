@@ -36,11 +36,16 @@ class JobRepository(
     fun observeJobs(): Flow<List<JobEntity>> = dao.observeAll()
     fun observeJob(jobId: String): Flow<JobEntity?> = dao.observe(jobId)
 
-    suspend fun createSharedJob(text: String, clientRequestId: String): String {
+    suspend fun createSharedJob(
+        text: String,
+        clientRequestId: String,
+        verificationMode: String = "speed",
+    ): String {
         val response = api.createJob(
             deviceId,
             CreateJobRequestDto(
                 source = JobSourceDto(value = text, platformHint = platformHint(text)),
+                verificationMode = verificationMode,
                 clientRequestId = clientRequestId,
             ),
         )
@@ -127,7 +132,9 @@ class JobRepository(
     }
 
     private suspend fun loadResult(jobId: String) {
-        val result = api.result(jobId).card
+        val response = api.result(jobId)
+        val result = response.card
+        val details = response.analysis?.verification
         val old = dao.get(jobId) ?: return
         val completed = old.copy(
             status = "completed",
@@ -136,6 +143,40 @@ class JobRepository(
             conclusion = result.conclusion,
             evidenceCount = result.evidenceCount,
             elapsedMs = result.elapsedMs,
+            claimDetails = details?.claimChecks
+                ?.mapNotNull { item ->
+                    val claim = item.claim?.trim().orEmpty()
+                    if (claim.isEmpty()) return@mapNotNull null
+                    buildString {
+                        append(listOfNotNull(item.claimId, item.verdict).joinToString(" · "))
+                        if (isNotEmpty()) append('\n')
+                        append(claim)
+                        item.basis?.trim()?.takeIf { it.isNotEmpty() }?.let { append("\n").append(it) }
+                        item.uncertainty?.trim()?.takeIf { it.isNotEmpty() }?.let { append("\n不确定性：").append(it) }
+                    }
+                }
+                ?.joinToString("\n\n")
+                ?.takeIf { it.isNotBlank() },
+            narrativeAnalysis = details?.narrativeAnalysis?.let { narrative ->
+                listOfNotNull(
+                    narrative.verdict?.trim(),
+                    narrative.methods?.filter { it.isNotBlank() }?.joinToString("、"),
+                    narrative.explanation?.trim(),
+                ).filter { it.isNotBlank() }.joinToString("\n").takeIf { it.isNotBlank() }
+            },
+            evidenceGaps = details?.evidenceGaps
+                ?.filter { it.isNotBlank() }
+                ?.joinToString("\n")
+                ?.takeIf { it.isNotBlank() },
+            keyEvidence = details?.evidenceUsed
+                ?.mapNotNull { evidence ->
+                    evidence.title?.trim()?.takeIf { it.isNotEmpty() }?.let { title ->
+                        evidence.url?.trim()?.takeIf { it.isNotEmpty() }
+                            ?.let { "$title\n$it" } ?: title
+                    }
+                }
+                ?.joinToString("\n\n")
+                ?.takeIf { it.isNotBlank() },
         )
         dao.upsert(completed)
         notifier.showResult(completed)

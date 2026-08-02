@@ -18,5 +18,9 @@ data class JobEntity(
     val headline: String? = null,
     val conclusion: String? = null,
     val evidenceCount: Int = 0,
+    val claimDetails: String? = null,
+    val narrativeAnalysis: String? = null,
+    val evidenceGaps: String? = null,
+    val keyEvidence: String? = null,
 )
 

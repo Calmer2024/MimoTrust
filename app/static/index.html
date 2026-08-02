@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="MiMo Trust 从视频信息提取到多源证据核实的全链路工作台">
   <title>MiMo Trust - 全链路信源核实</title>
-  <link rel="stylesheet" href="/static/app.css?v=0.5.2">
+  <link rel="stylesheet" href="/static/app.css?v=0.6.0">
 </head>
 <body>
   <div class="app-shell">
@@ -16,10 +16,10 @@
             <label class="sr-only" for="url">文章或平台网址、手机分享文本或待核验文字</label>
             <div class="field input-field">
               <i class="ui-icon" data-lucide="search" aria-hidden="true"></i>
-              <input id="url" type="text" autocomplete="off" maxlength="10000"
+              <input id="url" type="text" required autocomplete="off" maxlength="10000"
                 placeholder="粘贴链接、分享文本，或直接输入需要核验的文字">
               <button class="help-button tooltip" type="button" aria-label="支持的输入"
-                data-tooltip="支持直接输入文字，以及文章、快手、微博、小红书、视频号、抖音、B站和 YouTube 链接。">
+                data-tooltip="支持文章、快手、微博、小红书、视频号、抖音、B站、YouTube 链接和直接文字。">
                 <i data-lucide="circle-help" aria-hidden="true"></i>
               </button>
             </div>
@@ -29,6 +29,15 @@
               <select id="mode" aria-label="提取模式">
                 <option value="auto">智能提取</option>
                 <option value="visual">全模态</option>
+              </select>
+              <i class="select-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+            </div>
+            <div class="field select-field">
+              <i class="ui-icon" data-lucide="gauge" aria-hidden="true"></i>
+              <label class="sr-only" for="verification-mode">核验档位</label>
+              <select id="verification-mode" aria-label="核验档位">
+                <option value="speed">快速核验</option>
+                <option value="quality">质量核验</option>
               </select>
               <i class="select-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
             </div>
@@ -48,9 +57,7 @@
               </div>
               <span class="timer" id="timer">0.0s</span>
             </div>
-            <div class="skeleton skeleton-wide"></div>
-            <div class="skeleton skeleton-medium"></div>
-            <div class="skeleton skeleton-short"></div>
+            <ol class="pipeline-progress" id="pipeline-progress"></ol>
           </div>
 
           <div class="result" id="result">
@@ -126,6 +133,15 @@
                   <section class="view-section">
                     <div class="section-heading">
                       <div>
+                        <i class="section-icon" data-lucide="messages-square" aria-hidden="true"></i>
+                        <h2>叙事分析</h2>
+                      </div>
+                    </div>
+                    <div id="narrative-analysis"></div>
+                  </section>
+                  <section class="view-section">
+                    <div class="section-heading">
+                      <div>
                         <i class="section-icon" data-lucide="list-checks" aria-hidden="true"></i>
                         <h2>逐项核验</h2>
                       </div>
@@ -135,11 +151,30 @@
                   <section class="view-section">
                     <div class="section-heading">
                       <div>
-                        <i class="section-icon" data-lucide="library" aria-hidden="true"></i>
-                        <h2>引用证据</h2>
+                        <i class="section-icon" data-lucide="file-question" aria-hidden="true"></i>
+                        <h2>待补证据</h2>
                       </div>
                     </div>
-                    <div class="evidence-list" id="evidence-list"></div>
+                    <div id="evidence-gaps"></div>
+                  </section>
+                  <section class="view-section">
+                    <div class="section-heading">
+                      <div>
+                        <i class="section-icon" data-lucide="library" aria-hidden="true"></i>
+                        <h2>关键依据</h2>
+                      </div>
+                    </div>
+                    <div class="evidence-list" id="report-evidence"></div>
+                  </section>
+                  <section class="view-section report-source-section">
+                    <details>
+                      <summary>
+                        <i class="disclosure-icon" data-lucide="braces" aria-hidden="true"></i>
+                        <span>完整报告 JSON</span>
+                        <i class="summary-chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+                      </summary>
+                      <pre class="json-output report-json" id="report-json"></pre>
+                    </details>
                   </section>
                 </section>
 
@@ -152,7 +187,7 @@
                         <h2>结构化数据</h2>
                       </div>
                       <button class="help-button tooltip" type="button" aria-label="结构化数据说明"
-                        data-tooltip="供下游信源核实使用的严格 Schema 数据，只包含原子主张和隐性观点。">
+                        data-tooltip="供下游 M1–M7 核验使用的严格 Schema 数据，包含主题、主张文本和表达方式。">
                         <i data-lucide="circle-help" aria-hidden="true"></i>
                       </button>
                     </div>
@@ -266,6 +301,6 @@
   </div>
 
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
-  <script src="/static/app.js?v=0.5.2"></script>
+  <script src="/static/app.js?v=0.6.0"></script>
 </body>
 </html>

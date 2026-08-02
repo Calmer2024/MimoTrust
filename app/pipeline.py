@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import http.cookiejar
 import json
 import math
@@ -80,12 +79,7 @@ def _structured_information_from_model_result(
     result: dict[str, Any],
 ) -> StructuredInformation:
     """Validate protocol fields without treating transport metadata as payload."""
-    protocol_fields = {
-        "case_id",
-        "内容主题",
-        "原子主张",
-        "隐性观点",
-    }
+    protocol_fields = {"主题", "主张"}
     return StructuredInformation.model_validate(
         {key: value for key, value in result.items() if key in protocol_fields}
     )
@@ -1166,12 +1160,9 @@ def _local_structured_information(
     webpage_url: str,
 ) -> StructuredInformation:
     """Conservative schema-valid fallback without attempting semantic judgment."""
-    case_hash = hashlib.sha256(webpage_url.encode("utf-8")).hexdigest()[:12]
     return StructuredInformation(
-        case_id=f"case-{case_hash}",
-        content_topic=title.strip() or "未识别内容主题",
-        atomic_claims=[],
-        implicit_opinions=[],
+        topic=title.strip() or "未识别内容主题",
+        claims=[],
     )
 
 
@@ -1321,18 +1312,15 @@ def _clean_source_article(source_text: str, title: str) -> str:
 def _structured_reading_result(
     structured: StructuredInformation,
 ) -> tuple[str, list[str], list[str]]:
-    sections = [
-        *structured.atomic_claims,
-        *structured.implicit_opinions,
-    ]
-    topic = re.sub(r"\s+", " ", structured.content_topic).strip()
+    sections = [claim.text for claim in structured.claims]
+    topic = re.sub(r"\s+", " ", structured.topic).strip()
     topic = re.sub(
         r"[。！？!?；;，,、：:\s]+(?=[”’）】》」』]*$)", "", topic
     )
     summary = f"{topic}。" if topic else ""
     claims = []
-    for claim in structured.atomic_claims[:3]:
-        normalized = re.sub(r"\s+", " ", claim).strip()
+    for claim in structured.claims[:3]:
+        normalized = re.sub(r"\s+", " ", claim.text).strip()
         normalized = re.sub(
             r"[。！？!?；;，,、：:\s]+(?=[”’）】》」』]*$)",
             "",
@@ -1342,7 +1330,7 @@ def _structured_reading_result(
             claims.append(normalized)
     if claims:
         summary += "核心主张：" + "；".join(claims) + "。"
-    return summary, sections[:8], [structured.content_topic]
+    return summary, sections[:8], [structured.topic]
 
 
 async def _analyze_visual(
@@ -1869,10 +1857,7 @@ async def analyze(url: str, mode: str) -> AnalyzeResponse:
         full_visual_executed=full_visual_executed,
     ):
         critical_gaps.append("事件型视频的全视频多模态补充未完成")
-    structured_count = (
-        len(structured.atomic_claims)
-        + len(structured.implicit_opinions)
-    )
+    structured_count = len(structured.claims)
     if structured_conversion_degraded:
         coverage_status = "needs_review"
     elif critical_gaps:
@@ -1898,8 +1883,7 @@ async def analyze(url: str, mode: str) -> AnalyzeResponse:
     coverage_note = (
         f"语音覆盖 {audio_coverage:.1f}%；"
         f"全文重组保留 {text_retention:.1f}%；{visual_coverage_note}；"
-        f"结构化输出包含 {len(structured.atomic_claims)} 条原子主张和"
-        f"{len(structured.implicit_opinions)} 条隐性观点。"
+        f"结构化输出包含 {len(structured.claims)} 条待核验主张。"
     )
     if structured_conversion_degraded:
         coverage_note += (
