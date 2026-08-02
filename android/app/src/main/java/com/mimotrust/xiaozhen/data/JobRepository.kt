@@ -47,24 +47,29 @@ class JobRepository(
     fun observeJobs(): Flow<List<JobEntity>> = dao.observeAll()
     fun observeJob(jobId: String): Flow<JobEntity?> = dao.observe(jobId)
 
+    suspend fun cancelJob(jobId: String): Boolean = api.cancelJob(jobId).isSuccessful
+
     suspend fun createSharedJob(
         text: String,
         clientRequestId: String,
         verificationMode: String = "speed",
+        sourceType: String? = null,
+        sourcePlatformHint: String? = null,
+        sourceDisplayText: String? = null,
     ): String {
         val response = api.createJob(
             deviceId,
             CreateJobRequestDto(
                 source = JobSourceDto(
-                    type = if (containsHttpUrl(text)) "shared_url" else "agent_context",
+                    type = sourceType ?: if (containsHttpUrl(text)) "shared_url" else "agent_context",
                     value = text,
-                    platformHint = platformHint(text),
+                    platformHint = sourcePlatformHint ?: platformHint(text),
                 ),
                 verificationMode = verificationMode,
                 clientRequestId = clientRequestId,
             ),
         )
-        persistQueuedJob(response, text)
+        persistQueuedJob(response, sourceDisplayText ?: text)
         return response.jobId
     }
 

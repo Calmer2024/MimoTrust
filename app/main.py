@@ -37,6 +37,7 @@ from app.trust.service import (
     verify_structured_information,
 )
 from app.jobs.api import router as jobs_router
+from app.controlled_content import router as controlled_content_router
 
 
 app = FastAPI(
@@ -60,6 +61,7 @@ cache = ResultCache(settings.cache_ttl_seconds)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 app.include_router(jobs_router)
+app.include_router(controlled_content_router)
 
 
 async def _stabilize_result_thumbnail(result: AnalyzeResponse) -> bool:

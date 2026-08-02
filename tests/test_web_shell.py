@@ -156,7 +156,7 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
         assert field in entity
         assert field in database
     assert "模型思考过程" in ui
-    assert "StructuredReport(job)" in ui
+    assert "DetailTabContent(job, report, selectedTab, active)" in ui
     assert "核验摘要" in ui
     assert "信息提示" in ui
     assert "证据充分度" in ui
@@ -171,3 +171,57 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
     assert 'getSharedPreferences("mimo-ui"' in ui
     assert 'putString("verification-mode"' in ui
     assert "VerificationModeMenu" in ui
+    assert "keyboardController?.hide()" in ui
+    assert "focusManager.clearFocus(force = true)" in ui
+    assert "streamingOverallText(job.reportDraft)" in ui
+    assert 'Icon(Lucide.ChevronDown, "滑到最底"' in ui
+    assert "detectHorizontalDragGestures" in ui
+    assert "detectVerticalDragGestures" in ui
+    assert 'Summary("结论"), Claims("逐项核验"), Evidence("依据"), Process("过程")' in ui
+    assert "ExpandableClaimReportCard" in ui
+
+
+def test_floating_ball_is_opaque_bouncy_and_cancellable() -> None:
+    root = Path("android/app/src/main/java/com/mimotrust/xiaozhen")
+    service = (root / "overlay/FloatingBallService.kt").read_text(encoding="utf-8")
+    api = (root / "data/remote/MimoApi.kt").read_text(encoding="utf-8")
+    repository = (root / "data/JobRepository.kt").read_text(encoding="utf-8")
+
+    assert 'ValueAnimator.ofFloat(0f, 1f, 0f)' in service
+    assert 'duration = 600L' in service
+    assert 'repeatCount = 4' in service
+    assert 'if (!cancelled && state == FloatingBallState.Attention)' in service
+    assert 'setState(FloatingBallState.Idle, 0)' in service
+    assert 'alpha = 1f' in service
+    assert 'ValueAnimator.ofFloat(1f, .38f, 1f)' not in service
+    assert "snapToNearestBoundary" in service
+    assert "OvershootInterpolator" in service
+    assert "playCollisionEffect" in service
+    assert "drawFittedText" in service
+    assert "vibrateAttention" in service
+    assert "handleBallClick" in service
+    assert "cancelVerification" in service
+    assert 'FloatingBallState.Cancelling' in service
+    assert '@POST("v1/jobs/{jobId}/cancel")' in api
+    assert "suspend fun cancelJob(jobId: String)" in repository
+
+
+def test_sandbox_articles_and_galleries_flow_into_multimodal_analysis() -> None:
+    root = Path("android/app/src/main/java/com/mimotrust/xiaozhen")
+    contract = (root / "overlay/ControlledContentContract.kt").read_text(encoding="utf-8")
+    receiver = (root / "overlay/ControlledContentReceiver.kt").read_text(encoding="utf-8")
+    worker = Path("app/jobs/worker.py").read_text(encoding="utf-8")
+    ui = (root / "ui/MimoTrustApp.kt").read_text(encoding="utf-8")
+
+    for content_type in ("article", "rich_article", "image_gallery"):
+        assert f'"{content_type}"' in contract
+    assert 'CONTROLLED_CONTENT_KIND = "mimotrust_controlled_content"' in receiver
+    assert 'mimeType.startsWith("image/")' in receiver
+    assert 'mimeType.startsWith("text/")' in receiver
+    assert 'sourcePlatformHint = input.platformHint' in receiver
+    assert 'job.source.platform_hint == "mimotrust_sandbox"' in worker
+    assert "analyze_controlled_content(job.source.value)" in worker
+    assert "hashlib.sha256(data).hexdigest()" in worker
+    assert "analyze_upload_bundle(title" in worker
+    assert "ResultMascot(verdict, failed = false, size = 104.dp)" in ui
+    assert "Spacer(Modifier.width(10.dp))" in ui

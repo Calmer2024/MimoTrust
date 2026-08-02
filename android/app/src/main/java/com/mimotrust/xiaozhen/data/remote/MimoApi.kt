@@ -6,6 +6,7 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import retrofit2.Response
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -36,6 +37,9 @@ interface MimoApi {
 
     @GET("v1/jobs/{jobId}/result")
     suspend fun result(@Path("jobId") jobId: String): JobResultDto
+
+    @POST("v1/jobs/{jobId}/cancel")
+    suspend fun cancelJob(@Path("jobId") jobId: String): Response<Unit>
 }
 
 object MimoApiFactory {
@@ -50,4 +54,3 @@ object MimoApiFactory {
         .build()
         .create(MimoApi::class.java)
 }
-

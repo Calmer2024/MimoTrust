@@ -1,6 +1,8 @@
 package com.mimotrust.xiaozhen.overlay
 
 import android.animation.ValueAnimator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -18,6 +20,10 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.IBinder
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
@@ -26,6 +32,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.OvershootInterpolator
 import android.widget.Toast
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -46,7 +53,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class FloatingBallState {
-    Idle, Attention, Queued, Resolving, Searching, Finishing, Completed, Failed,
+    Idle, Attention, Queued, Resolving, Searching, Finishing, Cancelling, Completed, Failed,
 }
 
 class FloatingBallService : Service() {
@@ -56,6 +63,9 @@ class FloatingBallService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
     private var activeJobId: String? = null
     private var requestInFlight = false
+    private var pendingRequestId: String? = null
+    private var cancelWhenJobArrives = false
+    private val userCancelledJobIds = mutableSetOf<String>()
     private var jobsCollector: Job? = null
     private var resultPopup: View? = null
     private var lastPopupJobId: String? = null
@@ -72,12 +82,20 @@ class FloatingBallService : Service() {
         when (intent?.action) {
             ACTION_ATTENTION -> if (!requestInFlight && activeJobId == null) {
                 ballView?.setState(FloatingBallState.Attention, 0)
+                vibrateAttention()
             }
             ACTION_RESOLVING -> {
+                // The context grant has been consumed; cancellation must now be
+                // forwarded to the job as soon as it is created.
+                pendingRequestId = null
+                stopAttentionVibration()
                 ballView?.setState(FloatingBallState.Resolving, REQUEST_ACCEPTED_PROGRESS)
             }
             ACTION_FAILED -> {
+                pendingRequestId = null
+                cancelWhenJobArrives = false
                 requestInFlight = false
+                stopAttentionVibration()
                 ballView?.setState(FloatingBallState.Failed, 0)
             }
         }
@@ -88,6 +106,7 @@ class FloatingBallService : Service() {
 
     override fun onDestroy() {
         jobsCollector?.cancel()
+        stopAttentionVibration()
         scope.cancel()
         ballView?.stopAnimation()
         ballView?.let { runCatching { windowManager.removeView(it) } }
@@ -124,7 +143,7 @@ class FloatingBallService : Service() {
     private fun resizeBall(expanded: Boolean) {
         val params = layoutParams ?: return
         val density = resources.displayMetrics.density
-        val targetWidth = ((if (expanded) 168 else 68) * density).toInt()
+        val targetWidth = ((if (expanded) 196 else 68) * density).toInt()
         if (params.width == targetWidth) return
         val rightEdge = params.x + params.width
         params.width = targetWidth
@@ -135,27 +154,71 @@ class FloatingBallService : Service() {
         ballView?.let { windowManager.updateViewLayout(it, params) }
     }
 
-    private fun verifyCurrentVideo() {
-        if (activeJobId != null) {
+    private fun handleBallClick() {
+        if (requestInFlight || ballView?.state in setOf(
+                FloatingBallState.Queued,
+                FloatingBallState.Resolving,
+                FloatingBallState.Searching,
+                FloatingBallState.Finishing,
+                FloatingBallState.Cancelling,
+            )
+        ) {
+            cancelVerification()
+            return
+        }
+        if (activeJobId != null && ballView?.state in setOf(FloatingBallState.Completed, FloatingBallState.Failed)) {
             openApp(activeJobId)
             return
         }
-        if (requestInFlight) {
-            Toast.makeText(this, "正在获取当前视频，请稍候", Toast.LENGTH_SHORT).show()
-            return
-        }
+        verifyCurrentContent()
+    }
+
+    private fun verifyCurrentContent() {
+        stopAttentionVibration()
         requestInFlight = true
         val requestId = ControlledContentRequestCoordinator.request(this)
+        pendingRequestId = requestId
+        cancelWhenJobArrives = false
         Log.i(LOG_TAG, "CONTENT_CONTEXT_REQUEST_SENT request_id=$requestId")
         ballView?.setState(FloatingBallState.Queued, REQUEST_SENT_PROGRESS)
         ballView?.postDelayed({
             if (ControlledContentRequestCoordinator.isPending(this, requestId)) {
                 ControlledContentRequestCoordinator.cancel(this, requestId)
+                pendingRequestId = null
                 requestInFlight = false
                 ballView?.setState(FloatingBallState.Failed, 0)
-                Toast.makeText(this, "未获取到当前视频，请保持视频平台在前台后重试", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "未获取到当前内容，请保持内容平台在前台后重试", Toast.LENGTH_LONG).show()
             }
         }, ControlledContentRequestCoordinator.RESPONSE_TIMEOUT_MS)
+    }
+
+    private fun cancelVerification() {
+        stopAttentionVibration()
+        val hadPendingContextRequest = pendingRequestId != null
+        pendingRequestId?.let { ControlledContentRequestCoordinator.cancel(this, it) }
+        pendingRequestId = null
+        if (activeJobId == null) {
+            cancelWhenJobArrives = requestInFlight && !hadPendingContextRequest
+            requestInFlight = false
+            ballView?.setState(FloatingBallState.Idle, 0)
+            Toast.makeText(this, "已取消本次核验", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val jobId = activeJobId ?: return
+        userCancelledJobIds += jobId
+        ballView?.setState(FloatingBallState.Cancelling, 0)
+        scope.launch {
+            val cancelled = runCatching {
+                (application as MimoTrustApplication).repository.cancelJob(jobId)
+            }.getOrDefault(false)
+            if (cancelled) {
+                Toast.makeText(this@FloatingBallService, "正在取消核验", Toast.LENGTH_SHORT).show()
+            } else {
+                userCancelledJobIds -= jobId
+                ballView?.setState(FloatingBallState.Resolving, REQUEST_ACCEPTED_PROGRESS)
+                Toast.makeText(this@FloatingBallService, "取消失败，请稍后重试", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun observeJobs() {
@@ -165,18 +228,35 @@ class FloatingBallService : Service() {
                     ?: activeJobId?.let { id -> jobs.firstOrNull { it.jobId == id } }
                 if (tracked != null) {
                     requestInFlight = false
+                    pendingRequestId = null
                     val isNewJob = tracked.jobId != activeJobId
                     activeJobId = tracked.jobId
+                    if (cancelWhenJobArrives && tracked.status in setOf("queued", "running")) {
+                        cancelWhenJobArrives = false
+                        userCancelledJobIds += tracked.jobId
+                        ballView?.setState(FloatingBallState.Cancelling, 0)
+                        scope.launch {
+                            (application as MimoTrustApplication).repository.cancelJob(tracked.jobId)
+                        }
+                        return@collectLatest
+                    }
                     if (isNewJob) ballView?.setState(FloatingBallState.Idle, 0)
-                    ballView?.setState(mapState(tracked), tracked.progress)
+                    if (tracked.jobId !in userCancelledJobIds || tracked.status !in setOf("queued", "running")) {
+                        ballView?.setState(mapState(tracked), tracked.progress)
+                    }
                     if (tracked.status in setOf("completed", "failed", "cancelled") &&
-                        lastPopupJobId != tracked.jobId
+                        lastPopupJobId != tracked.jobId && tracked.jobId !in userCancelledJobIds
                     ) {
                         lastPopupJobId = tracked.jobId
                         showResultPopup(tracked)
                     }
                     if (tracked.status !in setOf("queued", "running")) {
-                        ballView?.postDelayed({ activeJobId = null }, 4_000)
+                        if (userCancelledJobIds.remove(tracked.jobId)) {
+                            activeJobId = null
+                            ballView?.setState(FloatingBallState.Idle, 0)
+                        } else {
+                            ballView?.postDelayed({ activeJobId = null }, 4_000)
+                        }
                     }
                 } else if (ballView?.state !in setOf(FloatingBallState.Attention, FloatingBallState.Completed, FloatingBallState.Failed)) {
                     ballView?.setState(FloatingBallState.Idle, 0)
@@ -227,7 +307,6 @@ class FloatingBallService : Service() {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(22).toFloat()
                 setColor(Color.WHITE)
-                setStroke(dp(2), if (failed) 0xFFD94841.toInt() else 0xFF25A75A.toInt())
             }
         }
         content.addView(ImageView(this).apply {
@@ -286,6 +365,28 @@ class FloatingBallService : Service() {
         }.start()
     }
 
+    private fun attentionVibrator(): Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        getSystemService(VibratorManager::class.java).defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        getSystemService(Vibrator::class.java)
+    }
+
+    private fun vibrateAttention() {
+        val vibrator = attentionVibrator()
+        if (!vibrator.hasVibrator()) return
+        // Eight short pulses; the complete cue finishes within three seconds.
+        val pattern = longArrayOf(
+            0, 115, 235, 115, 235, 115, 235, 115, 235,
+            115, 235, 115, 235, 115, 235, 115,
+        )
+        vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+    }
+
+    private fun stopAttentionVibration() {
+        attentionVibrator().cancel()
+    }
+
     private fun serviceNotification(): android.app.Notification {
         val intent = PendingIntent.getActivity(
             this,
@@ -296,7 +397,7 @@ class FloatingBallService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_shield)
             .setContentTitle("小真悬浮核验已开启")
-            .setContentText("点击悬浮球即可核实当前视频")
+            .setContentText("点击悬浮球即可核实当前内容")
             .setContentIntent(intent)
             .setOngoing(true)
             .setSilent(true)
@@ -316,11 +417,16 @@ class FloatingBallService : Service() {
         private var downRawY = 0f
         private var startX = 0
         private var startY = 0
+        private var boundaryAnimator: ValueAnimator? = null
+        private var collidedDuringDrag = false
 
         override fun onTouch(view: View, event: MotionEvent): Boolean {
             val params = layoutParams ?: return false
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    boundaryAnimator?.cancel()
+                    view.animate().cancel()
+                    view.alpha = 1f
                     downRawX = event.rawX
                     downRawY = event.rawY
                     startX = params.x
@@ -328,21 +434,69 @@ class FloatingBallService : Service() {
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = startX + (event.rawX - downRawX).toInt()
-                    params.y = startY + (event.rawY - downRawY).toInt()
+                    val targetX = startX + (event.rawX - downRawX).toInt()
+                    val targetY = startY + (event.rawY - downRawY).toInt()
+                    val maxX = (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0)
+                    val maxY = (resources.displayMetrics.heightPixels - params.height).coerceAtLeast(0)
+                    val collision = targetX !in 0..maxX || targetY !in 0..maxY
+                    params.x = targetX.coerceIn(0, maxX)
+                    params.y = targetY.coerceIn(0, maxY)
                     windowManager.updateViewLayout(view, params)
+                    if (collision && !collidedDuringDrag) {
+                        collidedDuringDrag = true
+                        playCollisionEffect(view)
+                    } else if (!collision) {
+                        collidedDuringDrag = false
+                    }
                     return true
                 }
                 MotionEvent.ACTION_UP -> {
                     val moved = abs(event.rawX - downRawX) + abs(event.rawY - downRawY)
                     if (moved < 18 * resources.displayMetrics.density) {
                         view.performClick()
-                        verifyCurrentVideo()
+                        handleBallClick()
+                    } else {
+                        snapToNearestBoundary(view, params)
                     }
                     return true
                 }
             }
             return false
+        }
+
+        private fun snapToNearestBoundary(view: View, params: WindowManager.LayoutParams) {
+            val density = resources.displayMetrics.density
+            val margin = (6 * density).toInt()
+            val maxX = (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0)
+            val targetX = if (params.x + params.width / 2 < resources.displayMetrics.widthPixels / 2) {
+                margin.coerceAtMost(maxX)
+            } else {
+                (maxX - margin).coerceAtLeast(0)
+            }
+            boundaryAnimator?.cancel()
+            boundaryAnimator = ValueAnimator.ofInt(params.x, targetX).apply {
+                duration = 320L
+                interpolator = OvershootInterpolator(.72f)
+                addUpdateListener {
+                    params.x = (it.animatedValue as Int).coerceIn(0, maxX)
+                    runCatching { windowManager.updateViewLayout(view, params) }
+                }
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        playCollisionEffect(view)
+                    }
+                })
+                start()
+            }
+        }
+
+        private fun playCollisionEffect(view: View) {
+            view.alpha = 1f
+            view.animate().cancel()
+            view.animate().scaleX(.90f).scaleY(1.07f).setDuration(75L).withEndAction {
+                view.animate().scaleX(1f).scaleY(1f).setDuration(190L)
+                    .setInterpolator(OvershootInterpolator(1.15f)).start()
+            }.start()
         }
     }
 
@@ -371,6 +525,7 @@ private class FloatingBallView(
         private set
     private var displayedProgress = 0f
     private var attentionAnimator: ValueAnimator? = null
+    private var attentionPulse = 0f
     private var progressAnimator: ValueAnimator? = null
 
     fun setState(value: FloatingBallState, progressValue: Int) {
@@ -407,12 +562,25 @@ private class FloatingBallView(
         val centerX = width / 2f
         val centerY = height / 2f
         val radius = width.coerceAtMost(height) * .43f
+        val density = resources.displayMetrics.density
         paint.style = Paint.Style.FILL
-        paint.color = Color.WHITE
-        paint.setShadowLayer(12f, 0f, 4f, 0x35000000)
+        paint.color = 0xFFFFFCFA.toInt()
+        paint.setShadowLayer(5f * density, 0f, 1.5f * density, 0x293A2922)
         setLayerType(LAYER_TYPE_SOFTWARE, paint)
         canvas.drawCircle(centerX, centerY, radius, paint)
         paint.clearShadowLayer()
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = .8f * density
+        paint.color = 0xFFE9DED8.toInt()
+        canvas.drawCircle(centerX, centerY, radius - paint.strokeWidth / 2f, paint)
+
+        if (state == FloatingBallState.Attention) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = (2.2f + attentionPulse * 1.8f) * density
+            paint.color = 0xFFFF5A1F.toInt()
+            canvas.drawCircle(centerX, centerY, radius - 1.7f * density, paint)
+        }
 
         drawAvatar(canvas, centerX, centerY, radius, stateColor(), stateSweep())
     }
@@ -437,7 +605,8 @@ private class FloatingBallView(
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         paint.textSize = 13f * resources.displayMetrics.scaledDensity
         paint.color = 0xFF201713.toInt()
-        canvas.drawText(stateLabel(), textLeft, height * .43f, paint)
+        val textWidth = width - textLeft - 13f * resources.displayMetrics.density
+        drawFittedText(canvas, stateLabel(), textLeft, height * .43f, textWidth)
 
         paint.typeface = Typeface.DEFAULT
         paint.textSize = 10.5f * resources.displayMetrics.scaledDensity
@@ -445,9 +614,10 @@ private class FloatingBallView(
         val detail = when (state) {
             FloatingBallState.Completed -> "点击查看结果"
             FloatingBallState.Failed -> "点击查看原因"
+            FloatingBallState.Cancelling -> "请稍候 · 正在停止"
             else -> "${displayedProgress.roundToInt()}% · 后台处理中"
         }
-        canvas.drawText(detail, textLeft, height * .68f, paint)
+        drawFittedText(canvas, detail, textLeft, height * .68f, textWidth)
 
         if (state !in setOf(FloatingBallState.Completed, FloatingBallState.Failed)) {
             val barLeft = textLeft
@@ -488,20 +658,32 @@ private class FloatingBallView(
         )
         canvas.restore()
 
+        val idle = state == FloatingBallState.Idle
+        val density = resources.displayMetrics.density
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = radius * .15f
+        paint.strokeWidth = if (idle) radius * .105f else radius * .15f
         paint.strokeCap = Paint.Cap.ROUND
-        paint.color = if (state == FloatingBallState.Idle) 0x33201713 else ringColor.and(0x00FFFFFF) or 0x33000000
+        paint.color = if (idle) 0xFFF0E6E0.toInt() else ringColor.and(0x00FFFFFF) or 0x33000000
         ringRect.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius)
         canvas.drawArc(ringRect, -90f, 360f, false, paint)
-        paint.color = ringColor
-        canvas.drawArc(ringRect, -90f, sweep, false, paint)
+        if (idle) {
+            val inset = paint.strokeWidth * .72f
+            paint.strokeWidth = .75f * density
+            paint.strokeCap = Paint.Cap.BUTT
+            paint.color = 0x669B8176
+            ringRect.inset(inset, inset)
+            canvas.drawArc(ringRect, -90f, 360f, false, paint)
+        } else {
+            paint.color = ringColor
+            canvas.drawArc(ringRect, -90f, sweep, false, paint)
+        }
     }
 
     private fun stateColor(): Int = when (state) {
         FloatingBallState.Attention, FloatingBallState.Queued, FloatingBallState.Resolving -> 0xFFFF5A1F.toInt()
         FloatingBallState.Searching -> 0xFF4F7FE8.toInt()
         FloatingBallState.Finishing -> 0xFF8A62D6.toInt()
+        FloatingBallState.Cancelling -> 0xFF8F827C.toInt()
         FloatingBallState.Completed -> 0xFF25A75A.toInt()
         FloatingBallState.Failed -> 0xFFD94841.toInt()
         FloatingBallState.Idle -> 0xFF201713.toInt()
@@ -509,7 +691,7 @@ private class FloatingBallView(
 
     private fun stateSweep(): Float = when (state) {
         FloatingBallState.Idle -> 0f
-        FloatingBallState.Attention, FloatingBallState.Failed -> 360f
+        FloatingBallState.Attention, FloatingBallState.Cancelling, FloatingBallState.Failed -> 360f
         else -> 360f * displayedProgress / 100f
     }
 
@@ -518,10 +700,23 @@ private class FloatingBallView(
         FloatingBallState.Resolving -> "解析视频"
         FloatingBallState.Searching -> "检索证据"
         FloatingBallState.Finishing -> "生成报告"
+        FloatingBallState.Cancelling -> "取消核验"
         FloatingBallState.Completed -> "核验完成"
         FloatingBallState.Failed -> "核验失败"
         FloatingBallState.Attention -> "可以核验"
         FloatingBallState.Idle -> "小真"
+    }
+
+    private fun drawFittedText(canvas: Canvas, value: String, x: Float, baseline: Float, maxWidth: Float) {
+        if (maxWidth <= 0f) return
+        if (paint.measureText(value) <= maxWidth) {
+            canvas.drawText(value, x, baseline, paint)
+            return
+        }
+        val suffix = "…"
+        var end = value.length
+        while (end > 0 && paint.measureText(value.substring(0, end) + suffix) > maxWidth) end--
+        canvas.drawText(value.substring(0, end) + suffix, x, baseline, paint)
     }
 
     private fun FloatingBallState.isExpanded(): Boolean = this !in setOf(
@@ -548,10 +743,38 @@ private class FloatingBallView(
 
     private fun startAttentionAnimation() {
         if (attentionAnimator?.isRunning == true) return
-        attentionAnimator = ValueAnimator.ofFloat(1f, .38f, 1f).apply {
-            duration = 820
-            repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { alpha = it.animatedValue as Float }
+        alpha = 1f
+        attentionAnimator = ValueAnimator.ofFloat(0f, 1f, 0f).apply {
+            duration = 600L
+            repeatCount = 4
+            addUpdateListener {
+                attentionPulse = it.animatedValue as Float
+                val scale = 1f + attentionPulse * .08f
+                scaleX = scale
+                scaleY = scale
+                alpha = 1f
+                invalidate()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    cancelled = true
+                }
+
+                override fun onAnimationEnd(animation: Animator) {
+                    attentionAnimator = null
+                    attentionPulse = 0f
+                    scaleX = 1f
+                    scaleY = 1f
+                    alpha = 1f
+                    if (!cancelled && state == FloatingBallState.Attention) {
+                        setState(FloatingBallState.Idle, 0)
+                    } else {
+                        invalidate()
+                    }
+                }
+            })
             start()
         }
     }
@@ -559,7 +782,10 @@ private class FloatingBallView(
     fun stopAnimation() {
         attentionAnimator?.cancel()
         attentionAnimator = null
+        attentionPulse = 0f
         alpha = 1f
+        scaleX = 1f
+        scaleY = 1f
     }
 
     override fun performClick(): Boolean {

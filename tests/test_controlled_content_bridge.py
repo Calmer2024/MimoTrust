@@ -37,6 +37,22 @@ def test_guardian_response_exchanges_and_verifies_analysis_asset() -> None:
         assert check in receiver
 
 
+def test_guardian_accepts_compound_article_and_gallery_manifests() -> None:
+    contract = GUARDIAN_CONTRACT.read_text(encoding="utf-8")
+    receiver = GUARDIAN_RECEIVER.read_text(encoding="utf-8")
+
+    assert 'setOf("video", "article", "rich_article", "image_gallery")' in contract
+    assert 'contentType !in SUPPORTED_CONTENT_TYPES' in contract
+    assert 'if (grant.contentType == "video")' in receiver
+    assert 'mimeType.startsWith("image/")' in receiver
+    assert 'mimeType.startsWith("text/")' in receiver
+    video_branch, non_video_branch = receiver.split(
+        'if (grant.contentType == "video")', 1
+    )[1].split('val compactAssets = JSONArray()', 1)
+    assert 'asset.optString("sha256") == grant.contentHash' in video_branch
+    assert 'asset.optString("sha256") == grant.contentHash' not in non_video_branch
+
+
 def test_comment_and_share_candidates_do_not_issue_grants() -> None:
     dispatcher = (
         ROOT

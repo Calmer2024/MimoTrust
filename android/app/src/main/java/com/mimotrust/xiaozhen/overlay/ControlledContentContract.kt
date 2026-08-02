@@ -9,6 +9,7 @@ import java.util.UUID
 data class ControlledContentGrant(
     val eventId: String,
     val trigger: String,
+    val contentType: String,
     val contentId: String,
     val contentVersion: String,
     val contentHash: String,
@@ -30,6 +31,7 @@ object ControlledContentContract {
     const val MODE_DEFERRED = "deferred_grant"
     const val MODE_GRANT = "grant_exchange"
     const val MAX_PAYLOAD_BYTES = 32 * 1024
+    val SUPPORTED_CONTENT_TYPES = setOf("video", "article", "rich_article", "image_gallery")
 
     fun parse(payload: String): ControlledContentGrant? {
         if (payload.isBlank() || payload.toByteArray(Charsets.UTF_8).size > MAX_PAYLOAD_BYTES) return null
@@ -44,7 +46,8 @@ object ControlledContentContract {
             val eventId = UUID.fromString(root.getString("event_id")).toString()
             val trigger = root.getString("trigger")
             val content = root.getJSONObject("content_ref")
-            if (content.getString("content_type") != "video") return null
+            val contentType = content.getString("content_type")
+            if (contentType !in SUPPORTED_CONTENT_TYPES) return null
             val access = root.getJSONObject("content_access")
             if (trigger != TRIGGER_GUARDIAN_REQUEST || access.getString("mode") != MODE_GRANT) return null
             if (access.getString("audience") != AUDIENCE) return null
@@ -52,6 +55,7 @@ object ControlledContentContract {
             ControlledContentGrant(
                 eventId = eventId,
                 trigger = trigger,
+                contentType = contentType,
                 contentId = content.getString("content_id"),
                 contentVersion = content.getString("content_version"),
                 contentHash = content.getString("content_hash"),

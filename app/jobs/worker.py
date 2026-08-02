@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+from fastapi import UploadFile
+from starlette.datastructures import Headers
 
 from app.jobs.artifacts import store_job_artifacts
 from app.jobs.models import EvidenceSummary, MobileResultCard, utc_now
 from app.jobs.runtime import JobRuntime
 from app.jobs.uploads import cleanup_upload_bundle, open_upload_bundle
 from app.models import AnalyzeRequest, AnalyzeResponse
+from app.security import REDIRECT_LIMIT, validate_public_url
 from app.trust.pipeline_v2.retrieval import RetrievalConfigurationError
 
 
@@ -30,6 +41,108 @@ def stream_event_kind(kind: str) -> str:
 
 class JobCancelled(Exception):
     pass
+
+
+CONTROLLED_CONTENT_KIND = "mimotrust_controlled_content"
+CONTROLLED_CONTENT_TYPES = {"article", "rich_article", "image_gallery"}
+CONTROLLED_MAX_ASSET_BYTES = 50 * 1024 * 1024
+CONTROLLED_MAX_TOTAL_BYTES = 150 * 1024 * 1024
+
+
+def _validate_controlled_asset_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}:
+        return
+    validate_public_url(url)
+
+
+async def _download_controlled_asset(client: httpx.AsyncClient, url: str) -> tuple[bytes, str]:
+    current = url
+    for _ in range(REDIRECT_LIMIT + 1):
+        _validate_controlled_asset_url(current)
+        response = await client.get(current)
+        if response.status_code in {301, 302, 303, 307, 308}:
+            location = response.headers.get("location")
+            if not location:
+                raise ValueError("Sandbox 素材跳转缺少目标地址")
+            current = urljoin(current, location)
+            continue
+        response.raise_for_status()
+        if len(response.content) > CONTROLLED_MAX_ASSET_BYTES:
+            raise ValueError("Sandbox 单个素材超过 50 MB")
+        return response.content, str(response.url)
+    raise ValueError(f"Sandbox 素材跳转超过 {REDIRECT_LIMIT} 次")
+
+
+async def analyze_controlled_content(value: str) -> AnalyzeResponse:
+    """Resolve a compact, grant-verified Sandbox article/gallery bundle."""
+    from app.content import analyze_upload_bundle
+
+    payload = json.loads(value)
+    if payload.get("kind") != CONTROLLED_CONTENT_KIND:
+        raise ValueError("无效的 Sandbox 内容载荷")
+    content_type = str(payload.get("content_type") or "")
+    if content_type not in CONTROLLED_CONTENT_TYPES:
+        raise ValueError("不支持的 Sandbox 图文内容类型")
+    title = str(payload.get("title") or "未命名内容")[:200]
+    author = str(payload.get("author") or "")[:100]
+    published_at = str(payload.get("published_at") or "")[:80]
+    canonical_url = str(payload.get("canonical_url") or "")[:2_000]
+    sections = [
+        f"[Sandbox 发布上下文]\n内容类型：{content_type}\n标题：{title}\n作者：{author}\n发布时间：{published_at}\n来源：{canonical_url}"
+    ]
+    inline_text = str(payload.get("text") or "").strip()
+    if inline_text:
+        sections.append(f"[帖子正文]\n{inline_text}")
+
+    uploads: list[UploadFile] = []
+    total_bytes = 0
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        assets = []
+    assets = sorted(
+        (item for item in assets[:12] if isinstance(item, dict)),
+        key=lambda item: int(item.get("order") or 0),
+    )
+    async with httpx.AsyncClient(follow_redirects=False, timeout=20) as client:
+        for index, asset in enumerate(assets, 1):
+            mime_type = str(asset.get("mime_type") or "").lower()
+            if not (mime_type.startswith("image/") or mime_type.startswith("text/")):
+                continue
+            data, _ = await _download_controlled_asset(client, str(asset.get("source_url") or ""))
+            total_bytes += len(data)
+            if total_bytes > CONTROLLED_MAX_TOTAL_BYTES:
+                raise ValueError("Sandbox 素材合计超过 150 MB")
+            expected_hash = str(asset.get("sha256") or "").lower()
+            if hashlib.sha256(data).hexdigest() != expected_hash:
+                raise ValueError("Sandbox 素材完整性校验失败")
+            asset_id = str(asset.get("asset_id") or f"asset-{index}")
+            if mime_type.startswith("text/"):
+                text = data.decode("utf-8", errors="replace")
+                if "html" in mime_type:
+                    text = BeautifulSoup(text, "html.parser").get_text("\n", strip=True)
+                sections.append(f"[Sandbox 文本素材：{asset_id}]\n{text}")
+                continue
+            suffix = {
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+                "image/gif": ".gif",
+            }.get(mime_type, Path(urlparse(str(asset.get("source_url") or "")).path).suffix or ".img")
+            uploads.append(UploadFile(
+                file=io.BytesIO(data),
+                size=len(data),
+                filename=f"{asset_id}{suffix}",
+                headers=Headers({"content-type": mime_type}),
+            ))
+
+    result = await analyze_upload_bundle(title, "\n\n".join(sections), uploads)
+    result.metadata.platform = "Sandbox 图文" if content_type == "image_gallery" else "Sandbox 文章"
+    result.metadata.content_type = "image_carousel" if content_type == "image_gallery" else "article"
+    result.metadata.title = title
+    result.metadata.uploader = author or None
+    result.metadata.webpage_url = canonical_url or None
+    return result
 
 
 def _evidence_summaries(verification: dict[str, Any]) -> list[EvidenceSummary]:
@@ -176,7 +289,9 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
         from app.main import analyze_content
 
         await runtime.emit(job_id, "media_extracting", "running", "正在理解视频、字幕与画面", 22, elapsed_ms=elapsed())
-        if job.source.type == "agent_context":
+        if job.source.type == "agent_context" and job.source.platform_hint == "mimotrust_sandbox":
+            result = await analyze_controlled_content(job.source.value)
+        elif job.source.type == "agent_context":
             result = await analyze_upload_bundle(
                 "分享文字核验",
                 job.source.value,
