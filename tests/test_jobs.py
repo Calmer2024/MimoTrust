@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import time
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -13,6 +14,35 @@ from app.jobs.store import SqlJobStore
 from app.jobs.worker import build_mobile_card, should_retry_with_visual, stream_event_kind
 from app.jobs.models import utc_now
 from app.jobs import artifacts as artifacts_module
+
+
+def test_memory_runtime_returns_before_local_worker_can_block(monkeypatch) -> None:
+    started = asyncio.Event()
+
+    async def blocking_worker(_runtime, _job_id: str) -> None:
+        started.set()
+        time.sleep(0.15)
+
+    monkeypatch.setattr("app.jobs.worker.process_job", blocking_worker)
+
+    async def scenario() -> None:
+        runtime = JobRuntime("memory")
+        request = CreateJobRequest(
+            source=JobSource(value="https://example.com/article"),
+            client_request_id="request-nonblocking-1234",
+        )
+        began = time.perf_counter()
+        job, reused = await runtime.create(request, "device-one")
+        elapsed = time.perf_counter() - began
+
+        assert reused is False
+        assert job.status == "queued"
+        assert elapsed < runtime.LOCAL_JOB_START_DELAY_SECONDS
+        assert not started.is_set()
+        await asyncio.sleep(runtime.LOCAL_JOB_START_DELAY_SECONDS + 0.02)
+        assert started.is_set()
+
+    asyncio.run(scenario())
 
 
 def test_memory_runtime_is_idempotent_and_orders_events() -> None:

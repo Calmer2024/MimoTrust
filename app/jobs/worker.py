@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -60,7 +61,14 @@ async def _download_controlled_asset(client: httpx.AsyncClient, url: str) -> tup
     current = url
     for _ in range(REDIRECT_LIMIT + 1):
         _validate_controlled_asset_url(current)
-        response = await client.get(current)
+        for attempt in range(3):
+            try:
+                response = await client.get(current)
+                break
+            except (httpx.ConnectError, httpx.TimeoutException):
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.25 * (2**attempt))
         if response.status_code in {301, 302, 303, 307, 308}:
             location = response.headers.get("location")
             if not location:

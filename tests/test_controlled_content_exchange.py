@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import httpx
 from fastapi.testclient import TestClient
 
 import app.controlled_content as controlled_content
 from app.main import app
+from app.jobs.worker import _download_controlled_asset
 
 
 REQUEST = {
@@ -71,3 +73,26 @@ def test_guardian_uses_local_exchange_proxy() -> None:
     assert '.put("exchange_url", grant.exchangeUrl)' in source
     assert 'BuildConfig.MIMO_API_BASE_URL + "v1/controlled-content/exchange"' in source
     assert "Request.Builder().url(grant.exchangeUrl)" not in source
+
+
+def test_controlled_asset_download_retries_transient_connect_error() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("transient", request=request)
+        return httpx.Response(200, content=b"verified image")
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            content, final_url = await _download_controlled_asset(
+                client,
+                "https://8.8.8.8/image.png",
+            )
+        assert content == b"verified image"
+        assert final_url == "https://8.8.8.8/image.png"
+
+    asyncio.run(scenario())
+    assert attempts == 2

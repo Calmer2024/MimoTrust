@@ -14,6 +14,8 @@ from app.jobs.store import JobStore, MemoryJobStore, SqlJobStore
 
 
 class JobRuntime:
+    LOCAL_JOB_START_DELAY_SECONDS = 0.1
+
     def __init__(self, mode: str | None = None) -> None:
         self.mode = (mode or settings.job_mode).lower()
         self.store: JobStore = (
@@ -57,12 +59,23 @@ class JobRuntime:
             await pool.enqueue_job("run_job", job.job_id, _queue_name=settings.job_queue_name)
             await pool.close()
         else:
-            from app.jobs.worker import process_job
-
-            task = asyncio.create_task(process_job(self, job.job_id))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            # Let the ASGI server flush the 202 response before local analysis
+            # starts. Some analysis adapters perform synchronous setup and can
+            # otherwise starve the event loop long enough for the mobile client
+            # to time out even though the job has already been persisted.
+            asyncio.get_running_loop().call_later(
+                self.LOCAL_JOB_START_DELAY_SECONDS,
+                self._start_local_job,
+                job.job_id,
+            )
         return job, False
+
+    def _start_local_job(self, job_id: str) -> None:
+        from app.jobs.worker import process_job
+
+        task = asyncio.create_task(process_job(self, job_id))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def emit(
         self,
