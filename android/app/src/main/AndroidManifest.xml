@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission
+        android:name="com.mimotrust.xiaozhen.permission.UPDATE_VIDEO_CONTEXT"
+        android:protectionLevel="signature" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="com.mimotrust.xiaozhen.permission.UPDATE_VIDEO_CONTEXT" />
+
+    <queries>
+        <package android:name="com.mimotrust.controlledcontent" />
+    </queries>
+
+    <application
+        android:name=".MimoTrustApplication"
+        android:allowBackup="true"
+        android:icon="@drawable/xiaozhen_app_icon"
+        android:label="小真核验"
+        android:roundIcon="@drawable/xiaozhen_app_icon"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MimoTrust"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustNothing">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <activity
+            android:name=".share.ShareReceiverActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.MimoTrust.Transparent">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".overlay.FloatingBallService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-enabled floating control for an explicitly requested verification workflow" />
+        </service>
+
+        <receiver
+            android:name=".overlay.VideoContextReceiver"
+            android:exported="true"
+            android:permission="com.mimotrust.xiaozhen.permission.UPDATE_VIDEO_CONTEXT">
+            <intent-filter>
+                <action android:name="com.mimotrust.xiaozhen.action.UPDATE_VIDEO_CONTEXT" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".overlay.ControlledContentReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.mimotrust.intent.action.CONTENT_CONTEXT" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

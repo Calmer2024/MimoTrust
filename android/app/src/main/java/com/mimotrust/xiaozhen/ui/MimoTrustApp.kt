@@ -1,0 +1,2752 @@
+package com.mimotrust.xiaozhen.ui
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.speech.RecognizerIntent
+import android.widget.MediaController
+import android.widget.VideoView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.GenericShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mimotrust.xiaozhen.R
+import com.mimotrust.xiaozhen.data.LocalAttachment
+import com.mimotrust.xiaozhen.data.StoredAttachment
+import com.mimotrust.xiaozhen.data.local.JobEntity
+import com.mimotrust.xiaozhen.data.remote.VerificationDetailsDto
+import com.mimotrust.xiaozhen.data.remote.ClaimCheckDto
+import com.mimotrust.xiaozhen.data.remote.EvidenceDto
+import com.mimotrust.xiaozhen.data.remote.JobEventPayloadDto
+import com.mimotrust.xiaozhen.overlay.FloatingBallManager
+import com.composables.icons.lucide.*
+import com.google.gson.Gson
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.net.URI
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
+import kotlin.math.max
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.roundToInt
+
+private enum class MainTab { Chat, History, Settings }
+private enum class DetailTab(val label: String) {
+    Summary("结论"), Claims("逐项核验"), Evidence("依据"), Process("过程")
+}
+private val BottomBarHeight = 68.dp
+
+private val AppIconContinuousCorner = GenericShape { size, _ ->
+    val width = size.width
+    val height = size.height
+    moveTo(width * .5f, 0f)
+    cubicTo(width * .76f, 0f, width * .84f, 0f, width * .92f, height * .08f)
+    cubicTo(width, height * .16f, width, height * .24f, width, height * .5f)
+    cubicTo(width, height * .76f, width, height * .84f, width * .92f, height * .92f)
+    cubicTo(width * .84f, height, width * .76f, height, width * .5f, height)
+    cubicTo(width * .24f, height, width * .16f, height, width * .08f, height * .92f)
+    cubicTo(0f, height * .84f, 0f, height * .76f, 0f, height * .5f)
+    cubicTo(0f, height * .24f, 0f, height * .16f, width * .08f, height * .08f)
+    cubicTo(width * .16f, 0f, width * .24f, 0f, width * .5f, 0f)
+    close()
+}
+
+@Composable
+fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
+    MimoTheme {
+        val jobs by viewModel.jobs.collectAsStateWithLifecycle()
+        var selectedTab by remember { mutableStateOf(if (initialJobId == null) MainTab.Chat else MainTab.History) }
+        var selectedId by remember { mutableStateOf(initialJobId) }
+        val chatListState = rememberLazyListState()
+        val historyListState = rememberLazyListState()
+        val settingsListState = rememberLazyListState()
+        val selected = jobs.firstOrNull { it.jobId == selectedId }
+        var displayedDetail by remember { mutableStateOf(selected) }
+        val density = LocalDensity.current
+        val imeBottom = with(density) { WindowInsets.ime.getBottom(this).toDp() }
+        val composerBottomInset = maxOf(0.dp, BottomBarHeight - imeBottom)
+
+        LaunchedEffect(selected) {
+            if (selected != null) displayedDetail = selected
+        }
+
+        Box(Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = Paper,
+                bottomBar = { BottomNavigation(selectedTab) { selectedTab = it } },
+            ) { scaffoldPadding ->
+                when (selectedTab) {
+                    MainTab.Chat -> ChatScreen(
+                        jobs = jobs,
+                        onVerify = viewModel::verify,
+                        onOpen = { selectedId = it.jobId },
+                        listState = chatListState,
+                        composerBottomInset = composerBottomInset,
+                        modifier = Modifier.padding(top = scaffoldPadding.calculateTopPadding()),
+                    )
+                    MainTab.History -> HistoryScreen(
+                        jobs = jobs,
+                        onOpen = { selectedId = it.jobId },
+                        listState = historyListState,
+                        modifier = Modifier.padding(scaffoldPadding),
+                    )
+                    MainTab.Settings -> SettingsScreen(
+                        listState = settingsListState,
+                        modifier = Modifier.padding(scaffoldPadding),
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = selected != null,
+                enter = slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = tween(320),
+                ) + fadeIn(animationSpec = tween(220)),
+                exit = slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(300),
+                ) + fadeOut(animationSpec = tween(180)),
+                modifier = Modifier.fillMaxSize().zIndex(10f),
+            ) {
+                (selected ?: displayedDetail)?.let { detail ->
+                    JobDetail(detail) { selectedId = null }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatScreen(
+    jobs: List<JobEntity>,
+    onVerify: (String, List<LocalAttachment>, String) -> Unit,
+    onOpen: (JobEntity) -> Unit,
+    listState: LazyListState,
+    composerBottomInset: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val scope = rememberCoroutineScope()
+    val preferences = remember(context) {
+        context.getSharedPreferences("mimo-ui", Context.MODE_PRIVATE)
+    }
+    var input by remember { mutableStateOf("") }
+    var attachments by remember { mutableStateOf<List<LocalAttachment>>(emptyList()) }
+    var verificationMode by remember {
+        mutableStateOf(
+            preferences.getString("verification-mode", "speed")
+                ?.takeIf { it in setOf("speed", "quality") }
+                ?: "speed"
+        )
+    }
+    var waitingForNewMessage by remember { mutableStateOf(false) }
+    var newestJobBeforeSend by remember { mutableStateOf<String?>(null) }
+    val visibleJobs = jobs.take(3).reversed()
+    val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { input = it }
+        }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        bitmap?.let { captured ->
+            context.saveCameraAttachment(captured)?.let { attachment ->
+                attachments = (attachments + attachment).take(12)
+            }
+        }
+    }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let {
+            context.persistAttachmentAccess(it)
+            attachments = (attachments + context.toLocalAttachment(it))
+                .distinctBy { item -> item.uri }
+                .take(12)
+        }
+    }
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
+    ) { uris ->
+        uris.forEach(context::persistAttachmentAccess)
+        attachments = (attachments + uris.map(context::toLocalAttachment))
+            .distinctBy { it.uri }
+            .take(12)
+    }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach(context::persistAttachmentAccess)
+        attachments = (attachments + uris.map(context::toLocalAttachment))
+            .distinctBy { it.uri }
+            .take(12)
+    }
+    val send = {
+        if (input.isNotBlank() || attachments.isNotEmpty()) {
+            newestJobBeforeSend = jobs.firstOrNull()?.jobId
+            waitingForNewMessage = true
+            onVerify(input.trim(), attachments, verificationMode)
+            input = ""
+            attachments = emptyList()
+            keyboardController?.hide()
+            focusManager.clearFocus(force = true)
+        }
+    }
+    val activeJob = jobs.firstOrNull { it.status == "queued" || it.status == "running" }
+    rememberFollowLatestListState(
+        state = listState,
+        contentKey = Triple(activeJob?.sequence, activeJob?.processArtifacts?.length, activeJob?.thinkingText?.length),
+        enabled = activeJob != null,
+    )
+
+    LaunchedEffect(jobs.firstOrNull()?.jobId, waitingForNewMessage) {
+        val newestJobId = jobs.firstOrNull()?.jobId
+        if (waitingForNewMessage && newestJobId != null && newestJobId != newestJobBeforeSend) {
+            // 欢迎卡占据索引 0，新消息从索引 1 开始。
+            listState.animateScrollToItem(visibleJobs.size)
+            waitingForNewMessage = false
+        }
+    }
+
+    Box(modifier.fillMaxSize().background(Paper)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 22.dp, top = 82.dp, end = 22.dp, bottom = 132.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            item { WelcomeHeroCard() }
+            if (jobs.isEmpty()) {
+                item { StartPrompt { input = it } }
+            } else {
+                items(visibleJobs, key = { it.jobId }) {
+                    ConversationTurn(it, onOpen)
+                }
+            }
+        }
+
+        BrandHeader(
+            verificationMode = verificationMode,
+            onVerificationModeChange = { mode ->
+                verificationMode = mode
+                preferences.edit().putString("verification-mode", mode).apply()
+            },
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(3f).background(Paper)
+                .padding(start = 22.dp, top = 8.dp, end = 22.dp, bottom = 6.dp),
+        )
+
+        val showScrollToBottom by remember(listState) {
+            derivedStateOf { listState.canScrollForward }
+        }
+        AnimatedVisibility(
+            visible = showScrollToBottom,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(bottom = composerBottomInset + 76.dp)
+                .zIndex(4f),
+        ) {
+            Box(
+                Modifier.size(36.dp).shadow(
+                    elevation = 4.dp,
+                    shape = CircleShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = .055f),
+                    spotColor = Color.Black.copy(alpha = .07f),
+                )
+                    .clip(CircleShape).background(Color.White)
+                    .clickable {
+                        scope.launch {
+                            listState.animateScrollBy(
+                                value = 100_000f,
+                                animationSpec = tween(680, easing = FastOutSlowInEasing),
+                            )
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Lucide.ChevronDown, "滑到最底", tint = Ink, modifier = Modifier.size(20.dp))
+            }
+        }
+
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = composerBottomInset).zIndex(2f),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            ChatComposer(
+                value = input,
+                onValueChange = { input = it },
+                attachments = attachments,
+                onRemoveAttachment = { target ->
+                    attachments = attachments.filterNot { it === target }
+                },
+                onCamera = { cameraLauncher.launch(null) },
+                onPickImages = {
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onPickVideo = { videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                onPickFiles = { filePicker.launch(arrayOf("image/*", "video/*")) },
+                onVoice = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.SIMPLIFIED_CHINESE.toLanguageTag())
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "请说出需要核实的内容")
+                    }
+                    runCatching { speechLauncher.launch(intent) }
+                },
+                onSend = send,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BrandHeader(
+    verificationMode: String,
+    onVerificationModeChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var muted by remember { mutableStateOf(false) }
+    Box(modifier.height(56.dp), contentAlignment = Alignment.Center) {
+        Image(
+            painter = painterResource(R.drawable.xiaozhen_logo),
+            contentDescription = "小真",
+            modifier = Modifier.align(Alignment.CenterStart).size(44.dp).clip(AppIconContinuousCorner),
+            contentScale = ContentScale.Crop,
+        )
+        Column(
+            Modifier.align(Alignment.Center).width(238.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
+            Text("小真", fontSize = 16.sp, color = Ink)
+            VerificationModeMenu(verificationMode, onVerificationModeChange)
+        }
+        IconButton(
+            onClick = { muted = !muted },
+            modifier = Modifier.align(Alignment.CenterEnd).size(44.dp),
+        ) {
+            Icon(
+                if (muted) Lucide.VolumeX else Lucide.Volume2,
+                if (muted) "开启声音" else "静音",
+                tint = Cocoa,
+                modifier = Modifier.size(21.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VerificationModeMenu(selected: String, onChange: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var dismissDrag by remember { mutableStateOf(0f) }
+    Box(contentAlignment = Alignment.TopCenter) {
+        Row(
+            modifier = Modifier.width(120.dp).height(22.dp).clip(RoundedCornerShape(11.dp))
+                .clickable { expanded = true }.padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (selected == "quality") "高质量思考" else "快速思考",
+                color = LightMuted,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+            )
+            Spacer(Modifier.width(3.dp))
+            Icon(Lucide.ChevronDown, "切换核验模式", tint = LightMuted, modifier = Modifier.size(13.dp))
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.width(280.dp).pointerInput(expanded) {
+                detectVerticalDragGestures(
+                    onVerticalDrag = { _, amount -> dismissDrag += amount },
+                    onDragEnd = {
+                        if (dismissDrag < -40.dp.toPx()) expanded = false
+                        dismissDrag = 0f
+                    },
+                    onDragCancel = { dismissDrag = 0f },
+                )
+            },
+            offset = DpOffset(x = (-80).dp, y = 4.dp),
+            shape = RoundedCornerShape(18.dp),
+            containerColor = Color.White,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            VerificationModeMenuItem(
+                title = "快速思考",
+                subtitle = "适合日常快速核验",
+                icon = Lucide.Zap,
+                selected = selected == "speed",
+            ) {
+                onChange("speed")
+                expanded = false
+            }
+            VerificationModeMenuItem(
+                title = "高质量思考",
+                subtitle = "进行更完整的证据检索",
+                icon = Lucide.Brain,
+                selected = selected == "quality",
+            ) {
+                onChange("quality")
+                expanded = false
+            }
+        }
+    }
+}
+
+@Composable
+private fun VerificationModeMenuItem(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(title, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(subtitle, color = LightMuted, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+        },
+        onClick = onClick,
+        leadingIcon = { Icon(icon, null, tint = Cocoa, modifier = Modifier.size(18.dp)) },
+        trailingIcon = {
+            if (selected) Icon(Lucide.Check, "当前模式", tint = Green, modifier = Modifier.size(17.dp))
+        },
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun WelcomeHeroCard() {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color.White)
+            .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.xiaozhen_hero),
+            contentDescription = "小真欢迎插画",
+            modifier = Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(22.dp)),
+            contentScale = ContentScale.Fit,
+        )
+        Spacer(Modifier.height(14.dp))
+        Text("Hi，今天想核实什么？", color = Ink, fontSize = 23.sp, lineHeight = 30.sp)
+        Spacer(Modifier.height(5.dp))
+        Text("发来链接或告诉我你看到的内容", color = LightMuted, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun StartPrompt(onPick: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        Text("你可以这样问", color = Muted, fontSize = 13.sp)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White)
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        ) {
+        listOf(
+            "这个视频里说的是真的吗？",
+            "帮我核实这条新闻的来源",
+            "这段网传消息可信吗？",
+        ).forEachIndexed { index, prompt ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { onPick(prompt) }.padding(vertical = 17.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Lucide.Link, null, tint = listOf(Blue, Green, Cyan)[index], modifier = Modifier.size(21.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(prompt, color = Ink)
+                Spacer(Modifier.weight(1f))
+                Icon(Lucide.ChevronRight, null, tint = LightMuted, modifier = Modifier.size(20.dp))
+            }
+            if (index < 2) HorizontalDivider(color = Divider, modifier = Modifier.padding(start = 33.dp))
+        }
+        }
+    }
+}
+
+@Composable
+private fun ChatComposer(
+    value: String,
+    onValueChange: (String) -> Unit,
+    attachments: List<LocalAttachment>,
+    onRemoveAttachment: (LocalAttachment) -> Unit,
+    onCamera: () -> Unit,
+    onPickImages: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickFiles: () -> Unit,
+    onVoice: () -> Unit,
+    onSend: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var previewAttachment by remember { mutableStateOf<LocalAttachment?>(null) }
+    var attachmentMenuExpanded by remember { mutableStateOf(false) }
+    val canSend = value.isNotBlank() || attachments.isNotEmpty()
+    Column(
+        modifier = modifier.fillMaxWidth().imePadding()
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp),
+    ) {
+        if (attachments.isNotEmpty()) {
+            AttachmentStrip(
+                attachments = attachments,
+                onOpen = { previewAttachment = it },
+                onRemove = onRemoveAttachment,
+                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, bottom = 8.dp),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp))
+                .background(Color.White).padding(horizontal = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onCamera, modifier = Modifier.size(48.dp)) { Icon(Lucide.Camera, "拍照", tint = Cocoa, modifier = Modifier.size(21.dp)) }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f).height(48.dp),
+                singleLine = true,
+                textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                cursorBrush = SolidColor(Cocoa),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                decorationBox = { innerTextField ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                        if (value.isEmpty()) Text("发消息或按住说话…", color = LightMuted, fontSize = 14.sp)
+                        innerTextField()
+                    }
+                },
+            )
+            Box {
+                IconButton(
+                    onClick = { attachmentMenuExpanded = true },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(Lucide.Plus, "添加图片或视频", tint = Cocoa, modifier = Modifier.size(24.dp))
+                }
+                DropdownMenu(
+                    expanded = attachmentMenuExpanded,
+                    onDismissRequest = { attachmentMenuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("选择图片") },
+                        leadingIcon = { Icon(Lucide.Images, null) },
+                        onClick = {
+                            attachmentMenuExpanded = false
+                            onPickImages()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("选择视频") },
+                        leadingIcon = { Icon(Lucide.Video, null) },
+                        onClick = {
+                            attachmentMenuExpanded = false
+                            onPickVideo()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("从文件选择") },
+                        leadingIcon = { Icon(Lucide.FolderOpen, null) },
+                        onClick = {
+                            attachmentMenuExpanded = false
+                            onPickFiles()
+                        },
+                    )
+                }
+            }
+            IconButton(
+                onClick = if (canSend) onSend else onVoice,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    if (canSend) Lucide.ArrowUp else Lucide.AudioLines,
+                    if (canSend) "发送" else "语音输入",
+                    tint = Cocoa,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+        }
+    }
+    previewAttachment?.uri?.let { uri ->
+        AttachmentPreviewDialog(
+            uri = uri,
+            mimeType = previewAttachment?.mimeType,
+            filename = previewAttachment?.filename,
+            onDismiss = { previewAttachment = null },
+        )
+    }
+}
+
+@Composable
+private fun AttachmentStrip(
+    attachments: List<LocalAttachment>,
+    onOpen: (LocalAttachment) -> Unit,
+    onRemove: ((LocalAttachment) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    LazyRow(
+        modifier = modifier.height(82.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(end = 8.dp),
+    ) {
+        items(
+            items = attachments,
+            key = { attachment -> attachment.uri?.toString() ?: attachment.filename.orEmpty() },
+        ) { attachment ->
+            AttachmentTile(
+                uri = attachment.uri,
+                mimeType = attachment.mimeType,
+                filename = attachment.filename,
+                onOpen = { onOpen(attachment) },
+                onRemove = onRemove?.let { remove -> { remove(attachment) } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun StoredAttachmentStrip(
+    attachments: List<StoredAttachment>,
+    modifier: Modifier = Modifier,
+) {
+    var previewAttachment by remember { mutableStateOf<StoredAttachment?>(null) }
+    LazyRow(
+        modifier = modifier.height(82.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(attachments, key = { it.uri }) { attachment ->
+            AttachmentTile(
+                uri = Uri.parse(attachment.uri),
+                mimeType = attachment.mimeType,
+                filename = attachment.filename,
+                onOpen = { previewAttachment = attachment },
+                onRemove = null,
+            )
+        }
+    }
+    previewAttachment?.let { attachment ->
+        AttachmentPreviewDialog(
+            uri = Uri.parse(attachment.uri),
+            mimeType = attachment.mimeType,
+            filename = attachment.filename,
+            onDismiss = { previewAttachment = null },
+        )
+    }
+}
+
+@Composable
+private fun AttachmentTile(
+    uri: Uri?,
+    mimeType: String?,
+    filename: String?,
+    onOpen: () -> Unit,
+    onRemove: (() -> Unit)?,
+) {
+    val context = LocalContext.current
+    val resolvedMime = mimeType ?: uri?.let(context.contentResolver::getType).orEmpty()
+    val preview by produceState<Bitmap?>(initialValue = null, uri, resolvedMime) {
+        value = uri?.let { loadAttachmentPreview(context, it, resolvedMime, 720) }
+    }
+    Box(
+        modifier = Modifier.size(76.dp).clip(RoundedCornerShape(14.dp))
+            .background(SurfaceSoft).clickable(onClick = onOpen),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (preview != null) {
+            Image(
+                bitmap = preview!!.asImageBitmap(),
+                contentDescription = filename ?: "附件预览",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Icon(
+                if (resolvedMime.startsWith("video/")) Lucide.Video else Lucide.Image,
+                contentDescription = filename,
+                tint = Cocoa,
+                modifier = Modifier.size(25.dp),
+            )
+        }
+        if (resolvedMime.startsWith("video/")) {
+            Box(
+                Modifier.align(Alignment.Center).size(28.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = .55f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Lucide.Play, "播放视频", tint = Color.White, modifier = Modifier.size(15.dp))
+            }
+        }
+        if (onRemove != null) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(4.dp).size(22.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = .58f)).clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Lucide.X, "移除附件", tint = Color.White, modifier = Modifier.size(13.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentPreviewDialog(
+    uri: Uri,
+    mimeType: String?,
+    filename: String?,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val resolvedMime = mimeType ?: context.contentResolver.getType(uri).orEmpty()
+    val image by produceState<Bitmap?>(initialValue = null, uri, resolvedMime) {
+        value = if (resolvedMime.startsWith("video/")) null
+        else loadAttachmentPreview(context, uri, resolvedMime, 1600)
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            if (resolvedMime.startsWith("video/")) {
+                AndroidView(
+                    factory = { viewContext ->
+                        VideoView(viewContext).apply {
+                            val controls = MediaController(viewContext)
+                            controls.setAnchorView(this)
+                            setMediaController(controls)
+                            setVideoURI(uri)
+                            setOnPreparedListener { player ->
+                                player.isLooping = false
+                                start()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (image != null) {
+                Image(
+                    bitmap = image!!.asImageBitmap(),
+                    contentDescription = filename ?: "图片预览",
+                    modifier = Modifier.fillMaxSize().padding(vertical = 56.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            } else {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).size(44.dp)
+                    .clip(CircleShape).background(Color.White.copy(alpha = .14f)),
+            ) {
+                Icon(Lucide.X, "关闭预览", tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+            if (!filename.isNullOrBlank()) {
+                Text(
+                    filename,
+                    color = Color.White.copy(alpha = .82f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp),
+                )
+            }
+        }
+    }
+}
+
+private suspend fun loadAttachmentPreview(
+    context: Context,
+    uri: Uri,
+    mimeType: String,
+    maxDimension: Int,
+): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        if (mimeType.startsWith("video/")) {
+            MediaMetadataRetriever().use { retriever ->
+                retriever.setDataSource(context, uri)
+                retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            }
+        }
+    }.getOrNull()
+}
+
+private fun Context.toLocalAttachment(uri: Uri): LocalAttachment = LocalAttachment(
+    uri = uri,
+    filename = attachmentDisplayName(uri),
+    mimeType = contentResolver.getType(uri),
+)
+
+private fun Context.attachmentDisplayName(uri: Uri): String? = contentResolver.query(
+    uri,
+    arrayOf(OpenableColumns.DISPLAY_NAME),
+    null,
+    null,
+    null,
+)?.use { cursor ->
+    if (cursor.moveToFirst()) cursor.getString(0) else null
+}
+
+private fun Context.persistAttachmentAccess(uri: Uri) {
+    runCatching {
+        contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+    }
+}
+
+private fun Context.saveCameraAttachment(bitmap: Bitmap): LocalAttachment? = runCatching {
+    val directory = File(filesDir, "attachments").apply { mkdirs() }
+    val filename = "camera-${System.currentTimeMillis()}.jpg"
+    val file = File(directory, filename)
+    FileOutputStream(file).use { output ->
+        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output))
+    }
+    LocalAttachment(
+        uri = FileProvider.getUriForFile(this, "$packageName.files", file),
+        filename = filename,
+        mimeType = "image/jpeg",
+    )
+}.getOrNull()
+
+@Composable
+private fun ConversationTurn(job: JobEntity, onOpen: (JobEntity) -> Unit) {
+    val sentAttachments = remember(job.attachmentsJson) {
+        runCatching {
+            Gson().fromJson(job.attachmentsJson, Array<StoredAttachment>::class.java)?.toList()
+        }.getOrNull().orEmpty()
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+            Column(
+                Modifier.widthIn(max = 300.dp).clip(
+                    RoundedCornerShape(topStart = 22.dp, topEnd = 8.dp, bottomStart = 22.dp, bottomEnd = 22.dp),
+                ).background(Cocoa).padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                if (sentAttachments.isNotEmpty()) {
+                    StoredAttachmentStrip(
+                        attachments = sentAttachments,
+                        modifier = Modifier.widthIn(max = 284.dp),
+                    )
+                }
+                Text(
+                    job.sourceText,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(formatMessageTime(job.createdAt), color = LightMuted, fontSize = 10.sp)
+        }
+
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+            Box(Modifier.clickable { onOpen(job) }) { AssistantResultBubble(job) }
+            val active = job.status == "queued" || job.status == "running"
+            if (!active) {
+                Spacer(Modifier.height(9.dp))
+                ResultMascot(
+                    verdict = job.verdict,
+                    failed = job.status == "failed" || job.status == "cancelled",
+                    size = 136.dp,
+                )
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(formatMessageTime(job.createdAt, job.elapsedMs), color = LightMuted, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun AssistantResultBubble(job: JobEntity) {
+    val active = job.status == "queued" || job.status == "running"
+    val failed = job.status == "failed" || job.status == "cancelled"
+    val visibleElapsed = rememberVisibleElapsed(job)
+    if (active) {
+        Column(
+            Modifier.fillMaxWidth().clip(
+                RoundedCornerShape(topStart = 8.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 22.dp),
+            ).background(Color.White).padding(horizontal = 15.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(17.dp), color = Orange, strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text(job.displayText, color = Ink, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp))
+                Text(formatElapsed(visibleElapsed), color = LightMuted, fontSize = 11.sp)
+            }
+            streamingOverallText(job.reportDraft)?.let { streamed ->
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .background(OrangeSoft).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text("最终判定 · 正在生成", color = Orange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(streamed, color = Ink, fontSize = 14.sp, lineHeight = 22.sp)
+                }
+            }
+        }
+        return
+    }
+    Column(
+        Modifier.fillMaxWidth().clip(
+            RoundedCornerShape(topStart = 8.dp, topEnd = 24.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
+        ).background(Color.White).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            when {
+                active -> CircularProgressIndicator(Modifier.size(18.dp), color = Orange, strokeWidth = 2.dp)
+                failed -> Icon(Lucide.CircleAlert, null, tint = Orange, modifier = Modifier.size(19.dp))
+                else -> Icon(Lucide.CircleCheck, null, tint = Green, modifier = Modifier.size(19.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                when {
+                    active -> "正在为你核实"
+                    failed -> "本次核实未完成"
+                    else -> "核实结果已生成"
+                },
+                color = Ink,
+                fontSize = 14.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(formatElapsed(visibleElapsed), color = LightMuted, fontSize = 11.sp)
+        }
+
+        SourceDetailsCard(job)
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                .background(if (active) Soft else OrangeSoft).padding(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(
+                        when {
+                            active -> processLabel(job.progress)
+                            failed -> "暂时无法得出结果"
+                            else -> job.verdict ?: "核实完成"
+                        },
+                        color = if (active) Cocoa else Orange,
+                        fontSize = 13.sp,
+                    )
+                    Text(
+                        job.headline ?: job.sourceText,
+                        color = Ink,
+                        fontSize = 17.sp,
+                        lineHeight = 23.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val summary = if (active) job.displayText else job.conclusion
+                    if (!summary.isNullOrBlank()) {
+                        Text(summary, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (!active && !job.sharingAdvice.isNullOrBlank()) {
+                        Text(
+                            "信息提示 · ${job.sharingAdvice}",
+                            color = Cocoa,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                }
+            }
+        }
+        if (!active && !failed) {
+            HorizontalDivider(color = Divider)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("公开证据 ${job.evidenceCount} 条", color = Muted, fontSize = 11.sp)
+                Text(formatCreatedAt(job.createdAt), color = LightMuted, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+internal fun streamingOverallText(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    val marker = Regex("\\\"o\\\"\\s*:\\s*\\[").find(raw) ?: return null
+    val source = raw.substring(marker.range.last + 1)
+    val values = mutableListOf<String>()
+    var index = 0
+    while (index < source.length && values.size < 3) {
+        while (index < source.length && (source[index].isWhitespace() || source[index] == ',')) index++
+        if (index >= source.length || source[index] != '"') break
+        index++
+        val value = StringBuilder()
+        var escaped = false
+        while (index < source.length) {
+            val char = source[index++]
+            when {
+                escaped -> {
+                    value.append(when (char) { 'n' -> '\n'; 't' -> '\t'; else -> char })
+                    escaped = false
+                }
+                char == '\\' -> escaped = true
+                char == '"' -> break
+                else -> value.append(char)
+            }
+        }
+        if (value.isNotEmpty()) values += value.toString()
+        if (index >= source.length) break
+    }
+    if (values.isEmpty()) return null
+    return buildString {
+        values.getOrNull(0)?.let { append("综合判定 · ").append(it) }
+        values.getOrNull(1)?.let { append("\n传播建议 · ").append(it) }
+        values.getOrNull(2)?.let { append("\n\n").append(it) }
+    }
+}
+
+@Composable
+private fun SourceDetailsCard(job: JobEntity, compact: Boolean = false, detailStyle: Boolean = false) {
+    val metadata = job.extractedMetadata?.lineSequence()
+        ?.mapNotNull { line ->
+            val parts = line.split('｜', limit = 2)
+            if (parts.size == 2 && parts[1].isNotBlank()) parts[0] to parts[1] else null
+        }
+        ?.toMap()
+        .orEmpty()
+    val source = remember(job.sourceText) { sourcePresentation(job.sourceText) }
+    val title = metadata["标题"] ?: source.detail
+    val platform = metadata["平台"] ?: source.label
+    val topic = metadata["主题"]
+    val iconSize = if (compact) 32.dp else 36.dp
+    val sectionRadius = if (detailStyle) 18.dp else if (compact) 15.dp else 18.dp
+
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(sectionRadius))
+            .background(if (detailStyle) Color.White else BlueSoft)
+            .padding(if (detailStyle) 17.dp else 14.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 9.dp else 11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("信源详情", color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(
+                    platform,
+                    color = Muted,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Box(
+                Modifier.size(iconSize).clip(RoundedCornerShape(11.dp))
+                    .background(if (detailStyle) BlueSoft else Color.White),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (source.isVideo) Lucide.Video else Lucide.Link,
+                    contentDescription = null,
+                    tint = Blue,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
+        Text(
+            title,
+            color = Ink,
+            fontSize = if (compact) 13.sp else 14.sp,
+            lineHeight = if (compact) 18.sp else 20.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        topic?.let {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(if (detailStyle) Soft else Color.White.copy(alpha = .78f))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Lucide.Hash, contentDescription = null, tint = Blue, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    it,
+                    color = Ink,
+                    fontSize = 11.sp,
+                    lineHeight = 17.sp,
+                    maxLines = if (compact) 1 else 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultSummaryCard(job: JobEntity, active: Boolean, failed: Boolean, progress: Float) {
+    val tint = if (active) Amber else Orange
+    val background = if (active) AmberSoft else OrangeSoft
+    val status = when {
+        active -> processLabel(job.progress)
+        failed -> "暂时无法得出结果"
+        else -> job.verdict ?: "核实完成"
+    }
+    val icon = when {
+        active -> Lucide.Search
+        failed -> Lucide.CircleAlert
+        else -> Lucide.CircleCheck
+    }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(background).padding(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        ResultSectionIcon(icon, tint)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(status, color = tint, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(
+                job.headline ?: job.sourceText,
+                color = Ink,
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val summary = if (active) job.displayText else job.conclusion
+            if (!summary.isNullOrBlank()) {
+                Text(summary, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+            if (!active && !job.sharingAdvice.isNullOrBlank()) {
+                Text("信息提示 · ${job.sharingAdvice}", color = Cocoa, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+            if (active) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(4.dp).clip(CircleShape),
+                    color = Amber,
+                    trackColor = Divider,
+                )
+                Text("${(progress * 100).roundToInt()}%", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProcessSectionCard(jobId: String, progress: Int, active: Boolean) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(GreenSoft).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ResultSectionHeader(
+            icon = Lucide.ListChecks,
+            title = "处理过程",
+            subtitle = if (active) processLabel(progress) else "核验流程记录",
+            tint = Green,
+        )
+        InlineProcess(jobId, progress, active, Modifier.padding(start = 24.dp))
+    }
+}
+
+@Composable
+private fun ResultSectionHeader(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        ResultSectionIcon(icon, tint)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(subtitle, color = Muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun ResultSectionIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color) {
+    Box(
+        Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Color.White.copy(alpha = .78f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun InlineProcess(jobId: String, progress: Int, isRunning: Boolean, modifier: Modifier = Modifier) {
+    val stages = listOf(
+        "读取内容" to 8,
+        "理解文字与画面" to 22,
+        "提取核心主张" to 42,
+        "规划核验" to 54,
+        "检索公开来源" to 66,
+        "归一化证据" to 72,
+        "筛选证据关系" to 81,
+        "综合研判" to 90,
+        "生成完整报告" to 100,
+    )
+    val targetCount = stages.count { progress >= it.second }
+    // 初次进入视图时直接采用当前真实阶段；只有任务仍在运行且收到后续事件时才增量展开。
+    var revealedCount by remember(jobId) { mutableStateOf(targetCount) }
+    LaunchedEffect(jobId, targetCount, isRunning) {
+        if (!isRunning) {
+            revealedCount = targetCount
+        } else {
+            while (revealedCount < targetCount) {
+                revealedCount += 1
+                delay(120)
+            }
+        }
+    }
+
+    Column(modifier) {
+        stages.forEachIndexed { index, (label, threshold) ->
+            val current = isRunning && index == targetCount - 1
+            val completed = index < targetCount && !current
+            AnimatedVisibility(
+                visible = index < revealedCount,
+                enter = fadeIn(tween(180)) + expandVertically(animationSpec = tween(220), expandFrom = Alignment.Top),
+            ) {
+                Row(Modifier.height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.width(12.dp).height(30.dp)) {
+                        val centerX = size.width / 2f
+                        val centerY = size.height / 2f
+                        if (index > 0) drawLine(Green, Offset(centerX, 0f), Offset(centerX, centerY), strokeWidth = 1.dp.toPx())
+                        if (index + 1 < revealedCount) {
+                            drawLine(
+                                if (completed) Green else Divider,
+                                Offset(centerX, centerY),
+                                Offset(centerX, size.height),
+                                strokeWidth = 1.dp.toPx(),
+                            )
+                        }
+                        drawCircle(if (completed) Green else Orange, radius = 4.dp.toPx(), center = Offset(centerX, centerY))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(label, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+                    if (current && progress < 100) {
+                        Spacer(Modifier.weight(1f))
+                        Text("进行中", color = Orange, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
+    val active = job.status == "queued" || job.status == "running"
+    val failed = job.status == "failed" || job.status == "cancelled"
+    val visibleElapsed = rememberVisibleElapsed(job)
+    val continuousProgress by animateFloatAsState(
+        targetValue = job.progress.coerceIn(0, 100) / 100f,
+        animationSpec = tween(700),
+        label = "history-progress-${job.jobId}",
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onOpen(job) },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(0.dp),
+    ) {
+        Column(Modifier.padding(19.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        active -> CircularProgressIndicator(Modifier.size(18.dp), color = Orange, strokeWidth = 2.dp)
+                        failed -> Icon(Lucide.CircleAlert, null, tint = Orange, modifier = Modifier.size(20.dp))
+                        else -> Icon(Lucide.CircleCheck, null, tint = Ink, modifier = Modifier.size(20.dp))
+                    }
+                }
+                Spacer(Modifier.width(11.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        when { active -> "小真正在核实"; failed -> "核实未完成"; else -> job.verdict ?: "核实完成" },
+                        color = Ink,
+                    )
+                    Text(
+                        if (active) job.displayText else formatCreatedAt(job.createdAt),
+                        color = Muted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(formatElapsed(visibleElapsed), color = Muted, fontSize = 11.sp)
+            }
+            SourceDetailsCard(job, compact = true)
+            Text(
+                job.headline ?: job.sourceText,
+                color = Ink,
+                fontSize = 17.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (active) {
+                LinearProgressIndicator(
+                    progress = { continuousProgress },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                    color = Orange,
+                    trackColor = Divider,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(processLabel(job.progress), color = Muted, fontSize = 12.sp)
+                    Text("${(continuousProgress * 100).roundToInt()}%", color = Muted, fontSize = 12.sp)
+                }
+            } else if (!job.conclusion.isNullOrBlank()) {
+                Text(job.conclusion, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryScreen(
+    jobs: List<JobEntity>,
+    onOpen: (JobEntity) -> Unit,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val filteredJobs = remember(jobs, query) {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) jobs else jobs.filter { job ->
+            listOfNotNull(
+                job.sourceText,
+                job.headline,
+                job.conclusion,
+                job.verdict,
+                job.displayText,
+                job.extractedMetadata,
+                sourcePresentation(job.sourceText).label,
+            ).any { it.contains(keyword, ignoreCase = true) }
+        }
+    }
+    Column(modifier.fillMaxSize().background(Paper)) {
+        Column(
+            Modifier.fillMaxWidth().padding(start = 22.dp, top = 22.dp, end = 22.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("历史", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
+            }
+            Row(
+                Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(23.dp))
+                    .background(Color.White).padding(horizontal = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Lucide.Search, contentDescription = null, tint = LightMuted, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(9.dp))
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                    cursorBrush = SolidColor(Cocoa),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) Text("搜索标题、来源或核实内容", color = LightMuted, fontSize = 13.sp)
+                            innerTextField()
+                        }
+                    },
+                )
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(32.dp)) {
+                        Icon(Lucide.X, contentDescription = "清除搜索", tint = Muted, modifier = Modifier.size(17.dp))
+                    }
+                }
+            }
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            when {
+                jobs.isEmpty() -> item { EmptyHistory() }
+                filteredJobs.isEmpty() -> item { EmptySearchResult(query) }
+                else -> items(filteredJobs, key = { it.jobId }) { JobCard(it, onOpen) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptySearchResult(query: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Lucide.SearchX, contentDescription = null, tint = LightMuted, modifier = Modifier.size(30.dp))
+        Spacer(Modifier.height(12.dp))
+        Text("没有找到相关记录", color = Ink)
+        Text("试试其他关键词 · $query", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun EmptyHistory() {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 92.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(64.dp).clip(CircleShape).background(SurfaceSoft), contentAlignment = Alignment.Center) {
+            Icon(Lucide.History, null, tint = LightMuted, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.height(15.dp))
+        Text("还没有核实记录", color = Ink)
+        Text("去对话页发送第一条链接吧", color = Muted, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun SettingsScreen(listState: LazyListState, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var notifications by remember { mutableStateOf(true) }
+    var darkMode by remember { mutableStateOf(false) }
+    var floatingBall by remember { mutableStateOf(FloatingBallManager.isEnabled(context) && FloatingBallManager.canDraw(context)) }
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        floatingBall = FloatingBallManager.canDraw(context)
+        if (floatingBall) FloatingBallManager.enable(context)
+    }
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize().background(Paper),
+        contentPadding = PaddingValues(22.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        item {
+            Box(Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+                Text("设置", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
+            }
+        }
+        item {
+            SettingsGroup {
+                SettingsToggle(Lucide.MessageCircle, "悬浮核验球", "刷视频时常驻，点击即可发起核验", floatingBall) { enabled ->
+                    if (!enabled) {
+                        FloatingBallManager.disable(context)
+                        floatingBall = false
+                    } else if (FloatingBallManager.canDraw(context)) {
+                        FloatingBallManager.enable(context)
+                        floatingBall = true
+                    } else {
+                        overlayPermissionLauncher.launch(FloatingBallManager.permissionIntent(context))
+                    }
+                }
+                HorizontalDivider(color = Divider, modifier = Modifier.padding(start = 54.dp))
+                SettingsToggle(Lucide.Bell, "核实完成提醒", "结果生成后及时通知", notifications) { notifications = it }
+                HorizontalDivider(color = Divider, modifier = Modifier.padding(start = 54.dp))
+                SettingsToggle(Lucide.Moon, "深色模式", "即将支持", darkMode, enabled = false) { darkMode = it }
+            }
+        }
+        item {
+            SettingsGroup {
+                SettingsLink(Lucide.Shield, "隐私与数据", "核实记录仅保存在你的设备")
+                HorizontalDivider(color = Divider, modifier = Modifier.padding(start = 54.dp))
+                SettingsLink(Lucide.Info, "关于小真", "版本 0.1.0")
+            }
+        }
+        item {
+            Text(
+                "AI 辅助核验仅供信息参考，请结合原始来源与完整语境判断。",
+                color = LightMuted,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White).padding(horizontal = 16.dp)) { content() }
+}
+
+@Composable
+private fun SettingsToggle(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = if (enabled) Green else LightMuted, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(title, color = if (enabled) Ink else LightMuted, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
+    }
+}
+
+@Composable
+private fun SettingsLink(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = Blue, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(title, color = Ink, modifier = Modifier.weight(1f))
+        Icon(Lucide.ChevronRight, null, tint = LightMuted, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun BottomNavigation(selected: MainTab, onSelect: (MainTab) -> Unit) {
+    Column(Modifier.fillMaxWidth().background(Paper)) {
+        if (selected != MainTab.Chat) HorizontalDivider(color = Divider, thickness = 0.5.dp)
+        Row(
+            Modifier.fillMaxWidth().height(BottomBarHeight).padding(horizontal = 42.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NavigationItem(MainTab.Chat, selected, "问小真", onSelect)
+            NavigationItem(MainTab.History, selected, "历史", onSelect)
+            NavigationItem(MainTab.Settings, selected, "设置", onSelect)
+        }
+    }
+}
+
+@Composable
+private fun NavigationItem(
+    tab: MainTab,
+    selected: MainTab,
+    label: String,
+    onSelect: (MainTab) -> Unit,
+) {
+    val active = tab == selected
+    Column(
+        Modifier.width(72.dp).clip(RoundedCornerShape(14.dp)).clickable { onSelect(tab) }.padding(vertical = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        when (tab) {
+            MainTab.Chat -> ChatTabIcon(active, label)
+            MainTab.History -> HistoryTabIcon(active, label)
+            MainTab.Settings -> SettingsTabIcon(active, label)
+        }
+        Spacer(Modifier.height(1.dp))
+        Text(label, color = if (active) Cocoa else LightMuted, fontSize = 9.sp, lineHeight = 12.sp)
+    }
+}
+
+@Composable
+private fun ChatTabIcon(active: Boolean, contentDescription: String) {
+    Box(
+        Modifier.size(28.dp).semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(28.dp)) {
+            scale(0.70f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+            val bubblePath = Path().apply {
+                moveTo(15.dp.toPx(), 2.dp.toPx())
+                cubicTo(22.dp.toPx(), 2.dp.toPx(), 27.dp.toPx(), 6.8.dp.toPx(), 27.dp.toPx(), 13.dp.toPx())
+                cubicTo(27.dp.toPx(), 19.2.dp.toPx(), 22.dp.toPx(), 24.dp.toPx(), 15.dp.toPx(), 24.dp.toPx())
+                lineTo(12.dp.toPx(), 24.dp.toPx())
+                lineTo(6.dp.toPx(), 28.dp.toPx())
+                lineTo(8.dp.toPx(), 22.dp.toPx())
+                cubicTo(4.8.dp.toPx(), 19.8.dp.toPx(), 3.dp.toPx(), 16.5.dp.toPx(), 3.dp.toPx(), 13.dp.toPx())
+                cubicTo(3.dp.toPx(), 6.8.dp.toPx(), 8.dp.toPx(), 2.dp.toPx(), 15.dp.toPx(), 2.dp.toPx())
+                close()
+            }
+            if (active) drawPath(path = bubblePath, color = Cocoa, style = Fill)
+            drawPath(
+                path = bubblePath,
+                color = if (active) Cocoa else LightMuted,
+                style = Stroke(width = 1.7.dp.toPx()),
+            )
+            listOf(11.dp, 15.dp, 19.dp).forEach { x ->
+                drawCircle(
+                    color = if (active) Color.White else LightMuted,
+                    radius = 1.15.dp.toPx(),
+                    center = Offset(x.toPx(), 13.dp.toPx()),
+                )
+            }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryTabIcon(active: Boolean, contentDescription: String) {
+    Canvas(
+        Modifier.size(28.dp).semantics { this.contentDescription = contentDescription },
+    ) {
+        scale(0.70f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val bodyColor = if (active) Cocoa else LightMuted
+        if (active) drawCircle(color = bodyColor, radius = 11.5.dp.toPx(), center = center, style = Fill)
+        drawCircle(
+            color = bodyColor,
+            radius = 11.5.dp.toPx(),
+            center = center,
+            style = Stroke(width = 1.7.dp.toPx()),
+        )
+        val detailColor = if (active) Color.White else LightMuted
+        drawLine(
+            color = detailColor,
+            start = center,
+            end = Offset(center.x, center.y - 6.dp.toPx()),
+            strokeWidth = 1.7.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = detailColor,
+            start = center,
+            end = Offset(center.x + 5.dp.toPx(), center.y + 3.dp.toPx()),
+            strokeWidth = 1.7.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+        drawCircle(detailColor, radius = 1.25.dp.toPx(), center = center)
+        }
+    }
+}
+
+@Composable
+private fun SettingsTabIcon(active: Boolean, contentDescription: String) {
+    Canvas(
+        Modifier.size(28.dp).semantics { this.contentDescription = contentDescription },
+    ) {
+        scale(0.70f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val outerRadius = 12.5.dp.toPx()
+        val rootRadius = 9.4.dp.toPx()
+        val gearPath = Path()
+        repeat(32) { index ->
+            val angle = -PI / 2 + index * (2 * PI / 32)
+            val radius = if (index % 4 == 1 || index % 4 == 2) outerRadius else rootRadius
+            val x = center.x + (cos(angle) * radius).toFloat()
+            val y = center.y + (sin(angle) * radius).toFloat()
+            if (index == 0) gearPath.moveTo(x, y) else gearPath.lineTo(x, y)
+        }
+        gearPath.close()
+        if (active) drawPath(path = gearPath, color = Cocoa, style = Fill)
+        drawPath(
+            path = gearPath,
+            color = if (active) Cocoa else LightMuted,
+            style = Stroke(width = 1.7.dp.toPx()),
+        )
+        drawCircle(
+            color = if (active) Color.White else LightMuted,
+            radius = 3.4.dp.toPx(),
+            center = center,
+            style = if (active) Fill else Stroke(width = 1.7.dp.toPx()),
+        )
+        }
+    }
+}
+
+@Composable
+private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
+    val active = job.status == "queued" || job.status == "running"
+    val listState = rememberLazyListState()
+    val report = remember(job.reportJson) {
+        job.reportJson?.let {
+            runCatching { Gson().fromJson(it, VerificationDetailsDto::class.java) }.getOrNull()
+        }
+    }
+    var selectedTabName by rememberSaveable(job.jobId) { mutableStateOf(DetailTab.Summary.name) }
+    val selectedTab = DetailTab.valueOf(selectedTabName)
+    var dragOffset by remember { mutableStateOf(0f) }
+    var edgeGesture by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val edgeWidth = with(density) { 32.dp.toPx() }
+    val dismissDistance = with(density) { 96.dp.toPx() }
+    BackHandler(onBack = onBack)
+    rememberFollowLatestListState(
+        state = listState,
+        contentKey = Triple(job.sequence, job.processArtifacts?.length, job.thinkingText?.length),
+        enabled = active && selectedTab == DetailTab.Process,
+    )
+
+    Column(
+        Modifier.fillMaxSize().background(Paper).statusBarsPadding()
+            .graphicsLayer { translationX = dragOffset }
+            .pointerInput(job.jobId) {
+                detectHorizontalDragGestures(
+                    onDragStart = { edgeGesture = it.x <= edgeWidth },
+                    onHorizontalDrag = { change, amount ->
+                        if (edgeGesture && amount > 0f) {
+                            change.consume()
+                            dragOffset = (dragOffset + amount).coerceAtLeast(0f)
+                        }
+                    },
+                    onDragEnd = {
+                        if (edgeGesture && dragOffset >= dismissDistance) onBack()
+                        dragOffset = 0f
+                        edgeGesture = false
+                    },
+                    onDragCancel = {
+                        dragOffset = 0f
+                        edgeGesture = false
+                    },
+                )
+            },
+    ) {
+        DetailHeader(onBack)
+        DetailTabBar(selectedTab) {
+            selectedTabName = it.name
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 18.dp, top = 18.dp, end = 18.dp, bottom = 30.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            item(key = selectedTab.name) {
+                DetailTabContent(job, report, selectedTab, active)
+            }
+            item {
+                Text(
+                    job.aiDisclaimer ?: "AI 辅助核验，仅供信息参考。请结合原始来源与完整语境判断。",
+                    color = Muted,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp, start = 12.dp, end = 12.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailHeader(onBack: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(66.dp).padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.align(Alignment.CenterStart).size(36.dp).shadow(
+                elevation = 4.dp,
+                shape = CircleShape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = .055f),
+                spotColor = Color.Black.copy(alpha = .07f),
+            )
+                .clip(CircleShape).background(Color.White).clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Lucide.ChevronLeft, "返回", tint = Ink, modifier = Modifier.size(20.dp))
+        }
+        Text("核实详情", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun DetailTabBar(selected: DetailTab, onSelect: (DetailTab) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp)).background(Soft).padding(3.dp),
+    ) {
+        DetailTab.entries.forEach { tab ->
+            Box(
+                Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(13.dp))
+                    .background(if (selected == tab) Color.White else Color.Transparent)
+                    .clickable { onSelect(tab) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    tab.label,
+                    color = if (selected == tab) Ink else Muted,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected == tab) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailTabContent(
+    job: JobEntity,
+    report: VerificationDetailsDto?,
+    tab: DetailTab,
+    active: Boolean,
+) {
+    val evidenceById = report?.evidenceUsed.orEmpty().associateBy { it.id }
+    when (tab) {
+        DetailTab.Summary -> Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            if (active && report == null) {
+                LiveVerdictDraft(job)
+            } else if (report != null) {
+                ReportHero(job, report)
+            } else {
+                FallbackVerdict(job)
+            }
+            SourceDetailsCard(job, compact = true, detailStyle = true)
+            report?.narrativeAnalysis?.let { narrative ->
+                val content = listOfNotNull(
+                    narrative.verdict,
+                    narrative.methods?.takeIf { it.isNotEmpty() }?.joinToString("、"),
+                    narrative.explanation,
+                ).joinToString("\n\n")
+                DisclosureSection("叙事分析", content, initiallyExpanded = false)
+            }
+            if (report == null) job.narrativeAnalysis?.let {
+                DisclosureSection("叙事分析", it, initiallyExpanded = false)
+            }
+        }
+        DetailTab.Claims -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val checks = report?.claimChecks.orEmpty()
+            if (checks.isEmpty()) {
+                if (!job.claimDetails.isNullOrBlank()) {
+                    DisclosureSection("逐项核验", job.claimDetails, initiallyExpanded = false)
+                } else {
+                    DetailEmptyState(Lucide.ListChecks, "暂无逐项核验", "核验完成后将在这里展示每条主张的判断。")
+                }
+            } else {
+                checks.forEach { ExpandableClaimReportCard(it, evidenceById) }
+            }
+        }
+        DetailTab.Evidence -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val evidence = report?.evidenceUsed.orEmpty()
+            if (evidence.isEmpty()) {
+                if (!job.keyEvidence.isNullOrBlank()) {
+                    DisclosureSection("关键依据", job.keyEvidence, initiallyExpanded = false)
+                } else {
+                    DetailEmptyState(Lucide.BookOpenCheck, "暂无关键依据", "当前没有可展示的公开证据。")
+                }
+            } else {
+                evidence.forEach { EvidenceLink(it, compact = false) }
+            }
+            report?.evidenceGaps?.takeIf { it.isNotEmpty() }?.let { gaps ->
+                DisclosureSection("待补证据", gaps.joinToString("\n\n"), initiallyExpanded = false)
+            }
+            if (report == null) job.evidenceGaps?.let {
+                DisclosureSection("待补证据", it, initiallyExpanded = false)
+            }
+        }
+        DetailTab.Process -> {
+            when {
+                active -> LiveGeneration(job)
+                !job.processArtifacts.isNullOrBlank() || !job.thinkingText.isNullOrBlank() ->
+                    ProcessHistory(job.processArtifacts.orEmpty(), job.thinkingText)
+                else -> DetailEmptyState(Lucide.Activity, "暂无过程记录", "当前任务没有保存可展示的核验过程。")
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveVerdictDraft(job: JobEntity) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(18.dp), color = Orange, strokeWidth = 2.dp)
+            Spacer(Modifier.width(9.dp))
+            Text(job.displayText, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+        streamingOverallText(job.reportDraft)?.let {
+            Text(it, color = Ink, fontSize = 15.sp, lineHeight = 24.sp)
+        }
+    }
+}
+
+@Composable
+private fun FallbackVerdict(job: JobEntity) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White).padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(job.verdict ?: "核实结果", color = verdictToneColor(job.verdict.orEmpty()), fontSize = 24.sp, fontWeight = FontWeight.Black)
+        job.headline?.let { Text(it, color = Ink, fontSize = 16.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold) }
+        job.conclusion?.let { Text(it, color = Muted, fontSize = 13.sp, lineHeight = 21.sp) }
+    }
+}
+
+@Composable
+private fun DetailEmptyState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    message: String,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 56.dp, horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(icon, null, tint = LightMuted, modifier = Modifier.size(28.dp))
+        Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(message, color = Muted, fontSize = 12.sp, lineHeight = 19.sp)
+    }
+}
+
+@Composable
+private fun DetailSection(title: String, content: String) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, fontWeight = FontWeight.Black, fontSize = 19.sp)
+            Text(content, color = Muted, lineHeight = 21.sp)
+        }
+    }
+}
+
+@Composable
+private fun LiveGeneration(job: JobEntity) {
+    val thinkingStages = remember(job.thinkingText) { splitThinkingStages(job.thinkingText) }
+    val artifacts = remember(job.processArtifacts) { parseProcessArtifacts(job.processArtifacts.orEmpty()) }
+    val planningThinking = thinkingStages.firstOrNull { it.title == "检索规划的模型思考" }
+    val synthesisThinking = thinkingStages.firstOrNull { it.title == "综合研判的模型思考" }
+    val activeThinking = when {
+        synthesisThinking != null -> synthesisThinking
+        planningThinking != null && artifacts.none { it.kind == "plan" } -> planningThinking
+        else -> null
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("核验记录", color = Ink, fontWeight = FontWeight.Black, fontSize = 21.sp)
+        Text("公开资料返回后会立即显示，你可以边等待边查看。", color = Muted, fontSize = 12.sp)
+        job.processArtifacts?.takeIf { it.isNotBlank() }?.let {
+            ProcessArtifacts(it, active = true, thinkingStages = thinkingStages)
+        }
+        ActiveProcessNode(job.displayText) {
+            activeThinking?.let {
+                ExpandableText("模型思考过程", it.content, initiallyExpanded = false)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveProcessNode(title: String, content: (@Composable () -> Unit)? = null) {
+    val transition = rememberInfiniteTransition(label = "active-node")
+    val nodeAlpha by transition.animateFloat(
+        initialValue = .42f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "active-node-alpha",
+    )
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(24.dp).padding(top = 5.dp), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.size(11.dp).alpha(nodeAlpha).clip(CircleShape).background(Orange))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            content?.invoke()
+        }
+    }
+}
+
+@Composable
+private fun ProcessHistory(raw: String, thinkingRaw: String?) {
+    val thinkingStages = remember(thinkingRaw) { splitThinkingStages(thinkingRaw) }
+    val synthesisThinking = thinkingStages.firstOrNull { it.title == "综合研判的模型思考" }
+        ?: thinkingStages.firstOrNull { it.title == "模型思考过程" }
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("核验过程", color = Ink, fontWeight = FontWeight.Black, fontSize = 19.sp)
+            ProcessArtifacts(
+                raw,
+                active = false,
+                initiallyExpanded = false,
+                thinkingStages = thinkingStages,
+                hasTrailingNode = synthesisThinking != null,
+            )
+            synthesisThinking?.let { ProcessThinkingNode("综合研判", it.content) }
+        }
+    }
+}
+
+private data class ThinkingStage(val title: String, val content: String)
+
+private val thinkingStageMarker = Regex("【(检索规划的模型思考|证据初筛的模型思考|综合研判的模型思考|模型思考)】\\n")
+
+private fun splitThinkingStages(raw: String?): List<ThinkingStage> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val matches = thinkingStageMarker.findAll(raw).toList()
+    if (matches.isEmpty()) return listOf(ThinkingStage("模型思考过程", raw.trim()))
+    return matches.mapIndexedNotNull { index, match ->
+        val end = matches.getOrNull(index + 1)?.range?.first ?: raw.length
+        val content = raw.substring(match.range.last + 1, end).trim()
+        content.takeIf { it.isNotBlank() }?.let { ThinkingStage(match.groupValues[1], it) }
+    }
+}
+
+private fun parseProcessArtifacts(raw: String): List<JobEventPayloadDto> =
+    raw.lineSequence().filter { it.isNotBlank() }.mapNotNull {
+        runCatching { Gson().fromJson(it, JobEventPayloadDto::class.java) }.getOrNull()
+    }.toList()
+
+@Composable
+private fun ProcessArtifacts(
+    raw: String,
+    active: Boolean,
+    initiallyExpanded: Boolean = true,
+    thinkingStages: List<ThinkingStage> = emptyList(),
+    hasTrailingNode: Boolean = false,
+) {
+    val artifacts = remember(raw) { parseProcessArtifacts(raw) }
+    val planningThinking = thinkingStages.firstOrNull { it.title == "检索规划的模型思考" }
+    val uriHandler = LocalUriHandler.current
+    artifacts.forEachIndexed { index, artifact ->
+        var expanded by remember(artifact.kind, artifact.title) { mutableStateOf(initiallyExpanded) }
+        var showAll by remember(artifact.kind, artifact.title) { mutableStateOf(false) }
+        val stageThinking = planningThinking.takeIf { artifact.kind == "plan" }
+        val hasFollowingNode = index < artifacts.lastIndex || active || hasTrailingNode
+        Row(
+            Modifier.fillMaxWidth().drawBehind {
+                if (hasFollowingNode) {
+                    val x = 5.dp.toPx()
+                    drawLine(
+                        Divider,
+                        Offset(x, 13.dp.toPx()),
+                        Offset(x, size.height + 7.dp.toPx()),
+                        1.dp.toPx(),
+                    )
+                }
+            }.padding(bottom = if (hasFollowingNode) 18.dp else 0.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(Modifier.width(24.dp).padding(top = 5.dp), contentAlignment = Alignment.TopStart) {
+                Box(Modifier.size(11.dp).clip(CircleShape).background(Ink))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(artifact.title ?: "阶段结果", color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        artifact.summary?.let { Text(it, color = Muted, fontSize = 11.sp, lineHeight = 17.sp) }
+                    }
+                    Icon(
+                        if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                        if (expanded) "收起" else "展开",
+                        tint = LightMuted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                AnimatedVisibility(expanded) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        stageThinking?.let {
+                            ExpandableText("模型思考过程", it.content, initiallyExpanded = false)
+                        }
+                        val allItems = artifact.items.orEmpty()
+                        val visibleItems = if (showAll) allItems else allItems.take(4)
+                        visibleItems.forEach { item -> ArtifactRow(item, uriHandler) }
+                        if (allItems.size > 4) {
+                            Text(
+                                if (showAll) "收起" else "查看全部 ${allItems.size} 项",
+                                color = Cocoa,
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable { showAll = !showAll }.padding(vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProcessThinkingNode(title: String, content: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(24.dp).padding(top = 5.dp), contentAlignment = Alignment.TopStart) {
+            Box(Modifier.size(11.dp).clip(CircleShape).background(Ink))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            ExpandableText("模型思考过程", content, initiallyExpanded = false)
+        }
+    }
+}
+
+@Composable
+private fun ArtifactRow(
+    item: com.mimotrust.xiaozhen.data.remote.JobArtifactItemDto,
+    uriHandler: androidx.compose.ui.platform.UriHandler,
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.White)
+            .clickable(enabled = !item.url.isNullOrBlank()) {
+                item.url?.let { runCatching { uriHandler.openUri(it) } }
+            }.padding(horizontal = 11.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            item.label?.let { Text(it, color = Cocoa, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            item.meta?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.width(7.dp))
+                Text(it, color = LightMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (!item.url.isNullOrBlank()) {
+                Spacer(Modifier.width(5.dp))
+                Icon(Lucide.ExternalLink, "打开来源", tint = Muted, modifier = Modifier.size(11.dp))
+            }
+        }
+        item.text?.let { Text(it, color = Muted, fontSize = 12.sp, lineHeight = 18.sp) }
+    }
+}
+
+@Composable
+private fun DisclosureSection(title: String, content: String, initiallyExpanded: Boolean) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(0.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(17.dp)) {
+            ExpandableText(title, content, initiallyExpanded)
+        }
+    }
+}
+
+@Composable
+private fun ExpandableText(title: String, content: String, initiallyExpanded: Boolean) {
+    var expanded by remember(title) { mutableStateOf(initiallyExpanded) }
+    Row(
+        Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Icon(
+            if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+            if (expanded) "收起" else "展开",
+            tint = Muted,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+    AnimatedVisibility(expanded) {
+        Text(
+            content,
+            color = Muted,
+            fontSize = 13.sp,
+            lineHeight = 21.sp,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun StructuredReport(job: JobEntity) {
+    val report = remember(job.reportJson) {
+        job.reportJson?.let {
+            runCatching { Gson().fromJson(it, VerificationDetailsDto::class.java) }.getOrNull()
+        }
+    }
+    if (report == null) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            job.claimDetails?.let { DetailSection("逐主张核验", it) }
+            job.narrativeAnalysis?.let { DetailSection("叙事分析", it) }
+            job.evidenceGaps?.let { DetailSection("待补证据", it) }
+            job.keyEvidence?.let { DetailSection("关键依据", it) }
+        }
+        return
+    }
+    val evidenceById = report.evidenceUsed.orEmpty().associateBy { it.id }
+    Column(verticalArrangement = Arrangement.spacedBy(30.dp)) {
+        ReportHero(job, report)
+        if (report.claimChecks.isNullOrEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xFFEFF4FF)).padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(Lucide.Info, null, tint = Color(0xFF4F7FE8), modifier = Modifier.size(20.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("未识别到可核验主张", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        report.message ?: job.conclusion ?: "当前内容没有需要外部事实核验的现实世界主张。",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        lineHeight = 19.sp,
+                    )
+                }
+            }
+        }
+        report.narrativeAnalysis?.let { narrative ->
+            Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                ReportSectionTitle(Lucide.MessagesSquare, "叙事分析")
+                Column(
+                    Modifier.fillMaxWidth().drawBehind {
+                        drawLine(Color(0xFF8A6A2D), Offset(1.5.dp.toPx(), 0f), Offset(1.5.dp.toPx(), size.height), 3.dp.toPx())
+                    }.padding(start = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(11.dp),
+                ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("判断", color = LightMuted, fontSize = 10.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(narrative.verdict ?: "未单独判断", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                        narrative.explanation?.let { Text(it, color = Muted, fontSize = 13.sp, lineHeight = 22.sp) }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            narrative.methods.orEmpty().take(4).forEach { method ->
+                                Text(
+                                    method,
+                                    color = Color(0xFF765B29),
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.border(1.dp, Color(0xFFDED3BB), RoundedCornerShape(6.dp))
+                                        .background(Color(0xFFF7F2E8), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                }
+            }
+        }
+        if (!report.claimChecks.isNullOrEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ReportSectionTitle(Lucide.ListChecks, "逐项核验")
+                report.claimChecks.forEach { check ->
+                    ClaimReportCard(check, evidenceById)
+                }
+            }
+        }
+        report.evidenceGaps?.takeIf { it.isNotEmpty() }?.let { gaps ->
+            Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                ReportSectionTitle(Lucide.FileQuestion, "待补证据")
+                gaps.forEachIndexed { index, gap ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        Text("${index + 1}", color = LightMuted, fontSize = 11.sp, modifier = Modifier.width(24.dp))
+                        Text(gap, color = Muted, fontSize = 13.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        report.evidenceUsed?.takeIf { it.isNotEmpty() }?.let { EvidenceSection(it) }
+    }
+}
+
+@Composable
+private fun ReportHero(job: JobEntity, report: VerificationDetailsDto) {
+    val verdict = report.overallVerdict ?: job.verdict ?: "待核实"
+    val visibleElapsed = rememberVisibleElapsed(job)
+    val selectedCount = report.evidenceSelectedCount.takeIf { it > 0 } ?: job.evidenceCount
+    val reviewedCount = report.evidenceReviewedCount.takeIf { it > 0 } ?: selectedCount
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(Color.White).padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ResultMascot(verdict, failed = false, size = 104.dp)
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("核验摘要", color = LightMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(verdict, color = Ink, fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        report.topic?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Ink, fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(report.conclusion ?: job.conclusion.orEmpty(), color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
+        report.sharingAdvice?.takeIf { it.isNotBlank() }?.let {
+            Row(verticalAlignment = Alignment.Top) {
+                Text("信息提示", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(9.dp))
+                Text(it, color = Muted, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Soft),
+        ) {
+            ReportMetric(report.claimChecks.orEmpty().size.toString(), "项主张", Modifier.weight(1f))
+            ReportMetric(reviewedCount.toString(), "条已审阅", Modifier.weight(1f), divider = true)
+            ReportMetric(selectedCount.toString(), "条入选", Modifier.weight(1f), divider = true)
+        }
+        Text("分析用时 ${formatElapsed(visibleElapsed)}", color = LightMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun ReportMetric(value: String, label: String, modifier: Modifier, divider: Boolean = false) {
+    Column(
+        modifier.drawBehind {
+            if (divider) drawLine(Divider, Offset.Zero, Offset(0f, size.height), 1.dp.toPx())
+        }
+            .padding(vertical = 11.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = LightMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun ReportSectionTitle(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = LightMuted, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(9.dp))
+        Text(title, color = Ink, fontWeight = FontWeight.Black, fontSize = 21.sp)
+    }
+}
+
+@Composable
+private fun ClaimReportCard(check: ClaimCheckDto, evidenceById: Map<String?, EvidenceDto>) {
+    val verdict = check.verdict ?: "待核实"
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(Color.White).padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(check.claimId ?: "主张", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            check.category?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.width(8.dp))
+                Text(it, color = LightMuted, fontSize = 11.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                verdict,
+                color = verdictToneColor(verdict),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(verdictToneColor(verdict).copy(alpha = .10f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        check.claim?.let { Text(it, color = Ink, fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold) }
+        check.evidenceSufficiency?.takeIf { it.isNotBlank() }?.let {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("证据充分度", color = LightMuted, fontSize = 10.sp)
+                Spacer(Modifier.width(9.dp))
+                Text(it, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        check.basis?.let { Text(it, color = Muted, fontSize = 13.sp, lineHeight = 21.sp) }
+        check.uncertainty?.takeIf { it.isNotBlank() }?.let {
+            Row(Modifier.fillMaxWidth().background(Soft).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Text("不确定性", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(9.dp))
+                Text(it, color = Muted, fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.weight(1f))
+            }
+        }
+        val sources = check.sourceIds.orEmpty().mapNotNull { evidenceById[it] }
+        if (sources.isEmpty()) {
+            Text("本项没有引用具体证据", color = LightMuted, fontSize = 11.sp)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                sources.forEach { EvidenceLink(it, compact = true) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpandableClaimReportCard(check: ClaimCheckDto, evidenceById: Map<String?, EvidenceDto>) {
+    val verdict = check.verdict ?: "待核实"
+    var expanded by remember(check.claimId, check.claim) { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White)
+            .clickable { expanded = !expanded }.padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(check.claimId ?: "主张", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            check.category?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.width(8.dp))
+                Text(it, color = LightMuted, fontSize = 11.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                verdict,
+                color = verdictToneColor(verdict),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(verdictToneColor(verdict).copy(alpha = .10f), CircleShape)
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Icon(
+                if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                if (expanded) "收起细节" else "展开细节",
+                tint = LightMuted,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        check.claim?.let {
+            Text(it, color = Ink, fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold)
+        }
+        AnimatedVisibility(expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                check.evidenceSufficiency?.takeIf { it.isNotBlank() }?.let {
+                    Text("证据充分度 · $it", color = Muted, fontSize = 11.sp)
+                }
+                check.basis?.let { Text(it, color = Muted, fontSize = 13.sp, lineHeight = 21.sp) }
+                check.uncertainty?.takeIf { it.isNotBlank() }?.let {
+                    Text("不确定性 · $it", color = Muted, fontSize = 11.sp, lineHeight = 18.sp,
+                        modifier = Modifier.fillMaxWidth().background(Soft).padding(11.dp))
+                }
+                val sources = check.sourceIds.orEmpty().mapNotNull { evidenceById[it] }
+                if (sources.isEmpty()) {
+                    Text("本项没有引用具体证据", color = LightMuted, fontSize = 11.sp)
+                } else {
+                    sources.forEach { EvidenceLink(it, compact = true) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EvidenceSection(evidence: List<EvidenceDto>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ReportSectionTitle(Lucide.BookOpenCheck, "关键依据")
+        evidence.forEach { EvidenceLink(it, compact = false) }
+    }
+}
+
+@Composable
+private fun EvidenceLink(item: EvidenceDto, compact: Boolean) {
+    val uriHandler = LocalUriHandler.current
+    val modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(if (compact) 8.dp else 18.dp))
+        .background(if (compact) Soft else Color.White)
+        .clickable(enabled = !item.url.isNullOrBlank()) {
+            item.url?.let { runCatching { uriHandler.openUri(it) } }
+        }.padding(horizontal = if (compact) 11.dp else 17.dp, vertical = if (compact) 9.dp else 17.dp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val metadata = listOfNotNull(
+            item.id?.takeIf { it.isNotBlank() },
+            item.author?.takeIf { it.isNotBlank() },
+            item.publishedDate?.takeIf { it.isNotBlank() },
+        )
+        if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), color = LightMuted, fontSize = 10.sp)
+        Row(verticalAlignment = Alignment.Top) {
+            Text(
+                item.title ?: item.url.orEmpty(),
+                color = if (compact) Muted else Ink,
+                fontSize = if (compact) 11.sp else 14.sp,
+                lineHeight = if (compact) 17.sp else 21.sp,
+                fontWeight = if (compact) FontWeight.Normal else FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            if (!item.url.isNullOrBlank()) {
+                Spacer(Modifier.width(7.dp))
+                Icon(Lucide.ExternalLink, "打开来源", tint = Muted, modifier = Modifier.size(14.dp))
+            }
+        }
+        item.relation?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Cocoa, fontSize = 11.sp, lineHeight = 17.sp)
+        }
+        if (!compact) item.snippet?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Muted, fontSize = 12.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+private fun verdictToneColor(verdict: String): Color = when (verdict) {
+    "主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实" -> Color(0xFF3F6C52)
+    "关键说法不符", "存在误导表达", "不实", "虚假", "误导" -> Color(0xFF99534C)
+    "部分说法不符", "真假混合", "部分属实" -> Color(0xFF8A6A2D)
+    else -> Color(0xFF5F6670)
+}
+
+private fun mascotResource(verdict: String?, failed: Boolean): Int = when {
+    failed -> R.drawable.xiaozhen_insufficient_evidence
+    verdict in setOf(
+        "主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实", "无需核验",
+    ) -> R.drawable.xiaozhen_core_supported
+    verdict in setOf(
+        "部分说法不符", "真假混合", "部分属实",
+    ) -> R.drawable.xiaozhen_partial_mismatch
+    verdict in setOf(
+        "存在误导表达", "误导",
+    ) -> R.drawable.xiaozhen_misleading_expression
+    verdict in setOf(
+        "关键说法不符", "不实", "虚假",
+    ) -> R.drawable.xiaozhen_key_mismatch
+    else -> R.drawable.xiaozhen_insufficient_evidence
+}
+
+@Composable
+private fun ResultMascot(verdict: String?, failed: Boolean, size: Dp, circular: Boolean = false) {
+    val description = when (mascotResource(verdict, failed)) {
+        R.drawable.xiaozhen_core_supported -> "小真核心事实有据表情"
+        R.drawable.xiaozhen_partial_mismatch -> "小真部分说法不符表情"
+        R.drawable.xiaozhen_misleading_expression -> "小真存在误导表达表情"
+        R.drawable.xiaozhen_key_mismatch -> "小真关键说法不符表情"
+        else -> "小真证据不足表情"
+    }
+    Image(
+        painter = painterResource(mascotResource(verdict, failed)),
+        contentDescription = description,
+        modifier = Modifier.size(size)
+            .clip(if (circular) CircleShape else RoundedCornerShape(6.dp))
+            .background(Color.White),
+        contentScale = ContentScale.Crop,
+    )
+}
+
+private fun verdictIcon(verdict: String): androidx.compose.ui.graphics.vector.ImageVector = when (verdict) {
+    "主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实" -> Lucide.BadgeCheck
+    "关键说法不符", "存在误导表达", "不实", "虚假", "误导" -> Lucide.BadgeX
+    "部分说法不符", "真假混合", "部分属实" -> Lucide.CircleDotDashed
+    else -> Lucide.CircleHelp
+}
+
+private fun processLabel(progress: Int): String = when (progress) {
+    in 0..12 -> "正在读取链接"
+    in 13..35 -> "正在理解文字与画面"
+    in 36..49 -> "正在整理待核实主张"
+    in 50..59 -> "正在规划检索"
+    in 60..74 -> "正在检索并归一化来源"
+    in 75..86 -> "正在筛选证据关系"
+    in 87..94 -> "正在综合研判"
+    else -> "正在生成完整报告"
+}
+
+private data class SourcePresentation(
+    val label: String,
+    val detail: String,
+    val isVideo: Boolean,
+)
+
+private fun sourcePresentation(value: String): SourcePresentation {
+    val normalized = value.trim()
+    val lower = normalized.lowercase(Locale.ROOT)
+    val recognizedVideo = "douyin.com" in lower || "iesdouyin.com" in lower ||
+        "bilibili.com" in lower || "b23.tv" in lower ||
+        "xiaohongshu.com" in lower || "xhslink.com" in lower ||
+        "kuaishou.com" in lower || "weibo.com" in lower || "weibo.cn" in lower ||
+        lower.startsWith("content://") || lower.endsWith(".mp4") ||
+        lower.endsWith(".mov") || lower.endsWith(".m4v")
+    val platform = when {
+        "douyin.com" in lower || "iesdouyin.com" in lower -> "抖音视频"
+        "bilibili.com" in lower || "b23.tv" in lower -> "哔哩哔哩视频"
+        "xiaohongshu.com" in lower || "xhslink.com" in lower -> "小红书视频"
+        "kuaishou.com" in lower -> "快手视频"
+        "weibo.com" in lower || "weibo.cn" in lower -> "微博视频"
+        lower.startsWith("content://") -> "相册视频"
+        lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".m4v") -> "本地视频"
+        lower.startsWith("http://") || lower.startsWith("https://") -> "网页来源"
+        else -> "用户提供的核实内容"
+    }
+    val detail = when {
+        lower.startsWith("content://") -> "已从设备相册选择"
+        lower.startsWith("http://") || lower.startsWith("https://") -> runCatching {
+            URI(normalized).host?.removePrefix("www.")
+        }.getOrNull().takeUnless { it.isNullOrBlank() } ?: normalized
+        else -> normalized.replace('\n', ' ').take(52).ifBlank { "等待读取来源信息" }
+    }
+    return SourcePresentation(platform, detail, recognizedVideo)
+}
+
+private val ChinaZoneId: ZoneId = ZoneId.of("Asia/Shanghai")
+
+private fun formatCreatedAt(value: String): String = runCatching {
+    Instant.parse(value).atZone(ChinaZoneId).format(DateTimeFormatter.ofPattern("MM月dd日 HH:mm"))
+}.getOrDefault("最近核实")
+
+private fun formatMessageTime(value: String, offsetMilliseconds: Long = 0): String = runCatching {
+    Instant.parse(value).plusMillis(offsetMilliseconds).atZone(ChinaZoneId)
+        .format(DateTimeFormatter.ofPattern("HH:mm"))
+}.getOrDefault("")
+
+private fun formatElapsed(milliseconds: Long): String {
+    val seconds = milliseconds / 1000
+    return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
+}
+
+@Composable
+private fun rememberFollowLatestListState(
+    state: LazyListState,
+    contentKey: Any?,
+    enabled: Boolean,
+) {
+    var followLatest by remember { mutableStateOf(true) }
+    LaunchedEffect(state) {
+        snapshotFlow {
+            val layout = state.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+            val atBottom = layout.totalItemsCount == 0 || (
+                last?.index == layout.totalItemsCount - 1 &&
+                    last.offset + last.size <= layout.viewportEndOffset + 8
+                )
+            state.isScrollInProgress to atBottom
+        }.collectLatest { (scrolling, atBottom) ->
+            when {
+                atBottom -> followLatest = true
+                scrolling -> followLatest = false
+            }
+        }
+    }
+    LaunchedEffect(contentKey, enabled) {
+        if (enabled && followLatest) {
+            delay(40)
+            val lastIndex = state.layoutInfo.totalItemsCount - 1
+            if (lastIndex >= 0) state.animateScrollToItem(lastIndex, 100_000)
+        }
+    }
+}
+
+@Composable
+private fun rememberVisibleElapsed(job: JobEntity): Long {
+    val active = job.status == "queued" || job.status == "running"
+    var now by remember(job.jobId) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(job.jobId, active) {
+        while (active) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    if (!active) return job.elapsedMs
+    val createdAt = runCatching { Instant.parse(job.createdAt).toEpochMilli() }.getOrNull() ?: return job.elapsedMs
+    return max(job.elapsedMs, now - createdAt)
+}

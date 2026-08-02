@@ -1,0 +1,398 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+
+import app.main as main_module
+import app.trust.service as service_module
+from app.models import StructuredInformation
+from app.trust.service import _client_result, verify_structured_information
+from app.trust.pipeline_v2.synthesis import build_report_request, validate_compact_report
+from app.trust.pipeline_v2.normalization import normalize_case_input
+from app.trust.pipeline_v2.evidence_triage import build_evidence_batches, build_triage_request
+from app.trust.pipeline_v2.planning import build_planning_request
+from app.trust.pipeline_v2.rendering import build_presentation_report, render_report_markdown
+
+
+def test_report_without_cited_evidence_cannot_publish_a_strong_verdict() -> None:
+    report = validate_compact_report(
+        {
+            "o": ["不实", "存在关键争议", "模型记忆声称该说法错误。", []],
+            "c": [["C1", "不实", "不足", [], "未找到支持材料。", ""]],
+            "n": ["存在引导", ["夸大"], "该内容可能引导读者。"],
+            "g": [],
+        },
+        {"案例编号": "case-one", "主张": [{"编号": "C1"}]},
+        {"证据": []},
+    )
+
+    assert report["整体判断"]["结论"] == "证据不足"
+    assert report["主张核验"][0]["结论"] == "证据不足"
+    assert report["主张核验"][0]["证据充分度"] == "不足"
+    assert report["叙事分析"]["判断"] == "证据不足"
+    assert report["整体判断"]["信息提示"] == "关键证据不足"
+    assert report["待补证据"]
+
+
+def test_narrative_guidance_cannot_leave_a_report_fully_credible() -> None:
+    report = validate_compact_report(
+        {
+            "o": ["可信", "证据与语境较完整", "基础研究真实。", ["E1"]],
+            "c": [["C1", "属实", "充分", [["E1", "S"]], "原文支持。", ""]],
+            "n": ["存在引导", ["省略限定条件"], "省略条件会夸大实际影响。"],
+            "g": [],
+        },
+        {"案例编号": "case-one", "主张": [{"编号": "C1"}]},
+        {"证据": [{"证据编号": "E1"}]},
+    )
+
+    assert report["整体判断"]["结论"] == "大体可信"
+    assert report["整体判断"]["信息提示"] == "存在语境缺失"
+
+
+def test_report_request_injects_the_current_date() -> None:
+    request = build_report_request(
+        {
+            "案例编号": "case-one",
+            "主题": "日期注入测试",
+            "主张": [{"编号": "C1", "文本": "测试主张", "表达": "直接"}],
+        },
+        {
+            "案例编号": "case-one",
+            "核验项": [
+                {"编号": "V1", "关联主张": ["C1"], "问题": "是否属实", "所需证据": "原始资料"}
+            ],
+            "查询": [
+                {"编号": "Q1", "关联核验项": ["V1"], "渠道": "网页", "文本": "测试查询"}
+            ],
+            "查询预算": 1,
+        },
+        {"案例编号": "case-one", "证据": []},
+        {"案例编号": "case-one", "证据判断": []},
+        current_date=date(2026, 8, 2),
+    )
+
+    assert '"当前日期":"2026-08-02"' in request["消息"][1]["content"]
+
+
+def test_rendering_uses_objective_labels_and_reads_legacy_advice() -> None:
+    report = build_presentation_report(
+        {
+            "案例编号": "case-one",
+            "主题": "兼容性测试",
+            "主张": [{"编号": "C1", "文本": "测试主张", "表达": "直接"}],
+        },
+        {
+            "案例编号": "case-one",
+            "证据": [{"证据编号": "E1", "标题": "来源", "链接": "https://example.com"}],
+        },
+        {
+            "案例编号": "case-one",
+            "整体判断": {
+                "结论": "可信",
+                "传播建议": "可正常传播",
+                "摘要": "存在直接支持材料。",
+                "关键证据": ["E1"],
+            },
+            "主张核验": [
+                {
+                    "主张编号": "C1",
+                    "结论": "属实",
+                    "证据充分度": "充分",
+                    "依据": [{"证据编号": "E1", "关系": "支持"}],
+                    "说明": "来源直接支持。",
+                    "不确定性": "",
+                }
+            ],
+            "叙事分析": {"判断": "未发现明显引导", "方式": [], "说明": "未见明显引导。"},
+            "待补证据": [],
+        },
+    )
+
+    assert report["整体判断"]["结论"] == "主要说法有据"
+    assert report["整体判断"]["信息提示"] == "证据与语境较完整"
+    markdown = render_report_markdown(report)
+    assert "## 核验摘要" in markdown
+    assert "**信息提示：** 证据与语境较完整" in markdown
+
+
+def test_source_context_reaches_planning_and_triage_requests(monkeypatch) -> None:
+    claims = normalize_case_input(
+        {
+            "主题": "驱蚊液研究的传播表述",
+            "主张": [{"文本": "实验中训练后的蚊子可能更接近含 DEET 气味的目标。", "表达": "转述"}],
+            "原始上下文": "驱蚊液完全失效，甚至会招蚊子，这是真的吗？",
+        },
+        case_id="context-case",
+    )
+    plan_request = build_planning_request(claims)
+    assert plan_request["审计输入"]["用户输入"]["案例"]["原始上下文"] == "驱蚊液完全失效，甚至会招蚊子，这是真的吗？"
+
+    evidence_pool = {
+        "案例编号": "context-case",
+        "证据": [{"证据编号": "E1", "标题": "论文", "链接": "https://example.com"}],
+    }
+    plan = {"核验项": [{"编号": "V1", "关联主张": ["C1"], "问题": "研究是否存在", "所需证据": "论文"}]}
+    batch = build_evidence_batches(evidence_pool)[0]
+    monkeypatch.setenv("MIMO_TRIAGE_QUALITY_MAX_COMPLETION_TOKENS", "12000")
+    request = build_triage_request(claims, plan, evidence_pool, batch, thinking="enabled")
+    encoded = request["消息"][1]["content"]
+    assert "驱蚊液完全失效，甚至会招蚊子" in encoded
+    assert request["参数"]["max_completion_tokens"] == 12000
+
+
+def test_planning_mode_uses_separate_completion_budgets(monkeypatch) -> None:
+    claims = normalize_case_input(
+        {
+            "主题": "规划额度测试",
+            "主张": [{"文本": "待核验事实", "表达": "直接"}],
+        },
+        case_id="planning-budget-case",
+    )
+    monkeypatch.setenv("MIMO_PLANNING_SPEED_MAX_COMPLETION_TOKENS", "4800")
+    monkeypatch.setenv("MIMO_PLANNING_QUALITY_MAX_COMPLETION_TOKENS", "19200")
+
+    speed = build_planning_request(claims, thinking="disabled")
+    quality = build_planning_request(claims, thinking="enabled")
+
+    assert speed["参数"]["max_completion_tokens"] == 4800
+    assert quality["参数"]["max_completion_tokens"] == 19200
+
+
+def _write_json(path: Path, value: object) -> None:
+    path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+
+def test_client_result_projects_m7_audited_artifacts(tmp_path: Path) -> None:
+    _write_json(
+        tmp_path / "07_report.json",
+        {
+            "版本": "m7-report-v1",
+            "案例编号": "case-one",
+            "主题": "完整报告投影测试",
+            "整体判断": {
+                "结论": "可信",
+                "摘要": "核验完成",
+                "信息提示": "证据与语境较完整",
+                "关键证据": ["E1"],
+            },
+            "主张核验": [
+                {
+                    "主张编号": "C1",
+                    "主张文本": "这是一条完整的测试主张",
+                    "表达": "直接",
+                    "结论": "属实",
+                    "证据充分度": "充分",
+                    "依据": [
+                        {
+                            "证据编号": "E1",
+                            "标题": "权威来源",
+                            "链接": "https://example.com/source",
+                            "关系": "支持",
+                        }
+                    ],
+                    "说明": "原始资料直接支持。",
+                    "不确定性": "",
+                }
+            ],
+            "叙事分析": {"判断": "无明显引导", "方式": [], "说明": "无"},
+            "待补证据": ["补充一手材料"],
+            "关键证据": [
+                {
+                    "证据编号": "E1",
+                    "标题": "权威来源",
+                    "链接": "https://example.com/source",
+                    "发布日期": "",
+                    "作者": "",
+                }
+            ],
+        },
+    )
+    _write_json(
+        tmp_path / "07_pipeline_metrics.json",
+        {
+            "阶段耗时合计毫秒": 1200,
+            "阶段": {"M1": {"耗时毫秒": 10}, "M7": {"耗时毫秒": 5}},
+            "检索": {"结果数": 5},
+        },
+    )
+    _write_json(
+        tmp_path / "02_verification_plan.json",
+        {"查询": [{"编号": "Q1", "文本": "测试查询"}]},
+    )
+    (tmp_path / "07_report.md").write_text("# 报告", encoding="utf-8")
+
+    result = _client_result(
+        SimpleNamespace(run_dir=tmp_path, case_id="case-one", run_id="run-one")
+    )
+
+    assert result["status"] == "completed"
+    assert result["overall_verdict"] == "主要说法有据"
+    assert result["sharing_advice"] == "证据与语境较完整"
+    assert result["claim_checks"][0]["claim_id"] == "C1"
+    assert result["evidence_used"][0]["id"] == "E1"
+    assert result["search_plan"]["web_queries"] == ["测试查询"]
+    assert result["report"]["主题"] == "完整报告投影测试"
+    assert result["report"]["待补证据"] == ["补充一手材料"]
+    assert result["evidence_gaps"] == ["补充一手材料"]
+
+
+def test_empty_structured_information_skips_verification() -> None:
+    result = asyncio.run(
+        verify_structured_information(
+            StructuredInformation(主题="没有可核验主张", 主张=[])
+        )
+    )
+    assert result["status"] == "skipped"
+    assert result["case_id"].startswith("case-")
+    assert result["message"] == "当前内容没有需要外部事实核验的现实世界主张。"
+
+
+def test_cached_verification_restores_complete_report(monkeypatch) -> None:
+    workspace = SimpleNamespace(case_id="case-one", run_id="run-one")
+    monkeypatch.setattr(
+        service_module.CaseRunWorkspace,
+        "open_existing",
+        lambda *_args: workspace,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_client_result",
+        lambda _workspace, mode: {
+            "status": "completed",
+            "verification_mode": mode,
+            "report": {"主题": "从磁盘恢复的完整报告"},
+        },
+    )
+
+    restored = service_module.hydrate_cached_verification(
+        {
+            "status": "completed",
+            "case_id": "case-one",
+            "run_id": "run-one",
+            "verification_mode": "quality",
+        }
+    )
+
+    assert restored["verification_mode"] == "quality"
+    assert restored["report"]["主题"] == "从磁盘恢复的完整报告"
+
+
+def test_verification_mode_selects_all_thinking_and_retrieval_budget(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: list[dict] = []
+    progress: list[str] = []
+
+    async def fake_pipeline(cases_root, case_id, **kwargs):
+        captured.append(
+            {
+                "case_id": case_id,
+                "payload": json.loads(
+                    (cases_root / case_id / "input.json").read_text(encoding="utf-8")
+                ),
+                **kwargs,
+            }
+        )
+        kwargs["progress"]("M1 输入规范化与稳定编号")
+        return SimpleNamespace(
+            run_dir=tmp_path,
+            case_id=case_id,
+            run_id="run-one",
+        ), {}
+
+    monkeypatch.setattr(service_module, "_cases_root", tmp_path / "cases")
+    monkeypatch.setattr(service_module, "run_full_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        service_module,
+        "_client_result",
+        lambda workspace, mode: {
+            "status": "completed",
+            "case_id": workspace.case_id,
+            "verification_mode": mode,
+        },
+    )
+    structured = StructuredInformation(
+        主题="档位透传测试",
+        主张=[
+            {
+                "文本": "这是一条用于验证档位透传的完整中文主张",
+                "表达": "转述",
+            }
+        ],
+    )
+
+    result = asyncio.run(
+        verify_structured_information(
+            structured,
+            "quality",
+            source_url="https://example.com/video/1",
+            progress=progress.append,
+        )
+    )
+    speed_result = asyncio.run(
+        verify_structured_information(
+            structured,
+            "speed",
+            source_url="https://example.com/video/2",
+            progress=progress.append,
+        )
+    )
+
+    assert captured[0]["report_thinking"] == "enabled"
+    assert captured[0]["planning_thinking"] == "enabled"
+    assert captured[0]["triage_thinking"] == "enabled"
+    assert captured[0]["retrieval_timeout_seconds"] == 10.0
+    assert captured[1]["report_thinking"] == "disabled"
+    assert captured[1]["planning_thinking"] == "disabled"
+    assert captured[1]["triage_thinking"] == "disabled"
+    assert captured[1]["retrieval_timeout_seconds"] == 10.0
+    assert captured[0]["payload"] == structured.model_dump(by_alias=True)
+    assert progress == ["M1 输入规范化与稳定编号"] * 2
+    assert result["verification_mode"] == "quality"
+    assert speed_result["verification_mode"] == "speed"
+
+
+def test_verify_endpoint_persists_result_to_requested_cache(monkeypatch) -> None:
+    structured = {
+        "主题": "缓存核验测试",
+        "主张": [
+            {
+                "文本": "这是一条用于验证缓存写回行为的完整中文主张",
+                "表达": "直接",
+            }
+        ],
+    }
+    stored = {"structured_data": structured}
+    writes: list[tuple[str, dict]] = []
+
+    async def fake_verify(_structured, _mode, **_kwargs):
+        return {"status": "completed", "overall_verdict": "可信"}
+
+    monkeypatch.setattr(main_module, "verify_structured_information", fake_verify)
+    monkeypatch.setattr(main_module.cache, "get", lambda _key: dict(stored))
+    monkeypatch.setattr(
+        main_module.cache,
+        "set",
+        lambda key, value: writes.append((key, value)),
+    )
+
+    key = "a" * 64
+    response = TestClient(main_module.app).post(
+        "/api/verify",
+        json={
+            "structured_data": structured,
+            "verification_mode": "quality",
+            "cache_key": key,
+        },
+    )
+
+    assert response.status_code == 200
+    assert writes[0][0] == key
+    assert writes[0][1]["verification"]["overall_verdict"] == "可信"

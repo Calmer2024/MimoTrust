@@ -1,0 +1,123 @@
+import asyncio
+import inspect
+
+import pytest
+from fastapi import HTTPException
+
+from app import main as main_module, mimo
+from app.content import extract_article
+from app.main import _execute_analysis, _is_direct_video_url, app
+from app.models import AnalyzeRequest
+from app.pipeline import PipelineError
+from app.security import resolve_content_input, validate_video_url
+from fastapi.testclient import TestClient
+
+
+def test_claim_extraction_preserves_narrator_conclusion_and_scope_shift() -> None:
+    prompt_source = inspect.getsource(mimo.structure_information)
+
+    assert "必须保留内容的核心落点" in prompt_source
+    assert "严格区分“引用依据”和“作者结论”" in prompt_source
+    assert "外推后的结论" in prompt_source
+    assert "权威性依据" in prompt_source
+    expression_schema = mimo.STRUCTURED_INFORMATION_SCHEMA["properties"]["主张"][
+        "items"
+    ]["properties"]["表达"]
+    assert "内容作者明确断言" in expression_schema["description"]
+    assert "命题仅归属于新闻、研究或他人" in expression_schema["description"]
+    assert "仍属于直接，不属于隐含" in expression_schema["description"]
+
+
+def test_extract_article_prefers_article_body_and_metadata() -> None:
+    html = """
+    <html><head><title>备用标题</title>
+    <meta property="og:title" content="核验文章">
+    <meta name="author" content="测试作者"></head>
+    <body><nav>导航噪声</nav><article>
+    <h1>核验文章</h1><p>这是第一段完整文章正文，用于核验来源。</p>
+    <p>这是第二段完整文章正文，包含需要检查的事实主张。</p>
+    </article><footer>页脚噪声</footer></body></html>
+    """
+
+    title, article, author, _ = extract_article(html, "https://news.example/article")
+
+    assert title == "核验文章"
+    assert author == "测试作者"
+    assert "第一段完整文章正文" in article
+    assert "导航噪声" not in article
+    assert "页脚噪声" not in article
+
+
+def test_article_input_accepts_public_non_platform_host(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.security.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("8.8.8.8", 443))],
+    )
+
+    assert resolve_content_input("文章 https://news.example/story") == "https://news.example/story"
+
+
+def test_authorized_direct_video_asset_is_not_classified_as_article() -> None:
+    assert _is_direct_video_url("https://cdn.example/video/demo.mp4?token=short-lived")
+    assert _is_direct_video_url("https://cdn.example/live/index.m3u8")
+    assert not _is_direct_video_url("https://news.example/story.html")
+
+
+def test_new_platform_hosts_are_allowed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.security.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("8.8.8.8", 443))],
+    )
+
+    for url in (
+        "https://www.kuaishou.com/short-video/abc",
+        "https://weibo.com/123/abc",
+        "https://www.xiaohongshu.com/explore/abc",
+        "https://channels.weixin.qq.com/web/pages/feed?exportkey=abc",
+    ):
+        validate_video_url(url)
+
+
+def test_upload_endpoint_requires_at_least_one_modality() -> None:
+    response = TestClient(app).post(
+        "/api/analyze/upload",
+        data={"title": "空案例", "text": "", "verify": "false"},
+    )
+
+    assert response.status_code == 422
+    assert "至少提供文本" in response.json()["detail"]
+
+
+def test_health_reports_expanded_input_scope() -> None:
+    payload = TestClient(app).get("/api/health").json()
+
+    assert {"快手", "微博", "小红书", "视频号"} <= set(payload["supported_platforms"])
+    assert "文章 URL" in payload["accepted_inputs"]
+
+
+def test_auto_platform_error_is_not_replaced_by_article_fallback(monkeypatch) -> None:
+    url = "https://www.douyin.com/video/123"
+    article_called = False
+
+    async def fail_platform(_url: str, _mode: str):
+        raise PipelineError("抖音浏览器适配器不可用")
+
+    async def fail_if_article(_url: str):
+        nonlocal article_called
+        article_called = True
+        raise AssertionError("platform URLs must not fall back to article extraction")
+
+    monkeypatch.setattr(main_module, "resolve_content_input", lambda *_args, **_kwargs: url)
+    monkeypatch.setattr(main_module, "analyze", fail_platform)
+    monkeypatch.setattr(main_module, "analyze_article_url", fail_if_article)
+
+    with pytest.raises(HTTPException) as captured:
+        asyncio.run(
+            _execute_analysis(
+                AnalyzeRequest(url=url, input_kind="auto", refresh=True, verify=False)
+            )
+        )
+
+    assert captured.value.status_code == 422
+    assert captured.value.detail == "抖音浏览器适配器不可用"
+    assert article_called is False

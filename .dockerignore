@@ -1,0 +1,10 @@
+.git
+.cache
+.venv
+android
+data
+tests
+__pycache__
+*.pyc
+.env
+

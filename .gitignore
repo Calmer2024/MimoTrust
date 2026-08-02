@@ -1,6 +1,15 @@
+.env
 .venv/
 __pycache__/
-*.py[cod]
 .pytest_cache/
+.cache/
+data/trust/
+*.egg-info/
+*.py[cod]
+cookies*.txt
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/app/build/
 sandbox/content_gateway/*.log
 sandbox/content_admin_data/
