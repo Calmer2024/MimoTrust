@@ -42,7 +42,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,6 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mimotrust.xiaozhen.data.local.JobEntity
+import kotlinx.coroutines.delay
+import java.time.Instant
+import kotlin.math.max
 
 @Composable
 fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
@@ -173,6 +178,7 @@ private fun HeroCard() {
 @Composable
 private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
     val active = job.status == "queued" || job.status == "running"
+    val visibleElapsed = rememberVisibleElapsed(job)
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onOpen(job) },
         shape = RoundedCornerShape(26.dp),
@@ -184,7 +190,7 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
                     if (active) CircularProgressIndicator(Modifier.size(19.dp), color = Ink, strokeWidth = 2.dp)
                     else Icon(Icons.Default.CheckCircle, null, tint = Ink, modifier = Modifier.size(20.dp))
                 }
-                Text(formatElapsed(job.elapsedMs), color = if (active) Color.White.copy(alpha = .65f) else Muted, fontSize = 12.sp)
+                Text(formatElapsed(visibleElapsed), color = if (active) Color.White.copy(alpha = .65f) else Muted, fontSize = 12.sp)
             }
             Text(job.headline ?: job.displayText, color = if (active) Color.White else Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Text(job.sourceText, color = if (active) Color.White.copy(alpha = .62f) else Muted, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
@@ -212,6 +218,7 @@ private fun EmptyJobsCard() {
 
 @Composable
 private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
+    val visibleElapsed = rememberVisibleElapsed(job)
     Scaffold(containerColor = Paper) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             item {
@@ -229,7 +236,7 @@ private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
                         HorizontalDivider(color = Color.White.copy(alpha = .15f))
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                             Metric("公开证据", "${job.evidenceCount} 条")
-                            Metric("分析用时", formatElapsed(job.elapsedMs))
+                            Metric("分析用时", formatElapsed(visibleElapsed))
                             Metric("流程进度", "${job.progress}%")
                         }
                     }
@@ -289,4 +296,20 @@ private fun BottomBar() {
 private fun formatElapsed(milliseconds: Long): String {
     val seconds = milliseconds / 1000
     return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
+}
+
+@Composable
+private fun rememberVisibleElapsed(job: JobEntity): Long {
+    val active = job.status == "queued" || job.status == "running"
+    var now by remember(job.jobId) { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(job.jobId, active) {
+        while (active) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+    if (!active) return job.elapsedMs
+    val createdAt = runCatching { Instant.parse(job.createdAt).toEpochMilli() }.getOrNull()
+        ?: return job.elapsedMs
+    return max(job.elapsedMs, now - createdAt)
 }

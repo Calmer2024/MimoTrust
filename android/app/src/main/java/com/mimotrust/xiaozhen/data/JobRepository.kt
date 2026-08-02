@@ -12,6 +12,7 @@ import com.mimotrust.xiaozhen.notification.VerificationNotifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -30,6 +31,7 @@ class JobRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gson = Gson()
     private val streams = mutableMapOf<String, EventSource>()
+    private val eventGate = MonotonicEventGate()
 
     fun observeJobs(): Flow<List<JobEntity>> = dao.observeAll()
     fun observeJob(jobId: String): Flow<JobEntity?> = dao.observe(jobId)
@@ -83,25 +85,31 @@ class JobRepository(
         override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
             val event = runCatching { gson.fromJson(data, JobEventDto::class.java) }.getOrNull() ?: return
             scope.launch {
-                val old = dao.get(jobId) ?: return@launch
-                if (event.sequence <= old.sequence) return@launch
-                val status = when (event.state) {
-                    "completed" -> "completed"
-                    "failed" -> "failed"
-                    "cancelled" -> "cancelled"
-                    else -> "running"
-                }
-                val updated = old.copy(
-                    status = status,
-                    stage = event.stage,
-                    displayText = event.displayText,
-                    progress = event.progressHint,
-                    sequence = event.sequence,
-                    elapsedMs = event.elapsedMs,
+                eventGate.apply(
+                    jobId = jobId,
+                    incomingSequence = event.sequence,
+                    currentSequence = { dao.get(jobId)?.sequence ?: Int.MAX_VALUE },
+                    update = {
+                        val old = dao.get(jobId) ?: return@apply
+                        val status = when (event.state) {
+                            "completed" -> "completed"
+                            "failed" -> "failed"
+                            "cancelled" -> "cancelled"
+                            else -> "running"
+                        }
+                        val updated = old.copy(
+                            status = status,
+                            stage = event.stage,
+                            displayText = event.displayText,
+                            progress = event.progressHint,
+                            sequence = event.sequence,
+                            elapsedMs = event.elapsedMs,
+                        )
+                        dao.upsert(updated)
+                        notifier.showProgress(updated)
+                        if (status == "completed") loadResult(jobId)
+                    },
                 )
-                dao.upsert(updated)
-                notifier.showProgress(updated)
-                if (status == "completed") loadResult(jobId)
             }
         }
 
@@ -111,6 +119,10 @@ class JobRepository(
 
         override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {
             synchronized(this@JobRepository) { streams.remove(jobId) }
+            scope.launch {
+                delay(2_000)
+                if (dao.get(jobId)?.status in setOf("queued", "running")) observeEvents(jobId)
+            }
         }
     }
 
@@ -137,4 +149,3 @@ class JobRepository(
         else -> null
     }
 }
-
