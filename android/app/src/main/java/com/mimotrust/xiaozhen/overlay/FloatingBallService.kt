@@ -338,6 +338,39 @@ class FloatingBallService : Service() {
             dismissResultPopup()
             openApp(job.jobId)
         }
+        var gestureDownX = 0f
+        var gestureDownY = 0f
+        content.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    view.animate().cancel()
+                    gestureDownX = event.rawX
+                    gestureDownY = event.rawY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val upwardDistance = (event.rawY - gestureDownY).coerceAtMost(0f)
+                    view.translationY = upwardDistance
+                    view.alpha = (1f + upwardDistance / dp(150).toFloat()).coerceIn(.35f, 1f)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val deltaX = event.rawX - gestureDownX
+                    val deltaY = event.rawY - gestureDownY
+                    when {
+                        deltaY <= -dp(46) -> dismissResultPopup()
+                        abs(deltaX) + abs(deltaY) < dp(10) -> view.performClick()
+                        else -> view.animate().translationY(0f).alpha(1f).setDuration(180L).start()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    view.animate().translationY(0f).alpha(1f).setDuration(180L).start()
+                    true
+                }
+                else -> false
+            }
+        }
 
         val params = WindowManager.LayoutParams(
             resources.displayMetrics.widthPixels - dp(28),
@@ -360,7 +393,11 @@ class FloatingBallService : Service() {
     private fun dismissResultPopup() {
         val popup = resultPopup ?: return
         resultPopup = null
-        popup.animate().alpha(0f).translationY(-24f).setDuration(160L).withEndAction {
+        val targetY = minOf(
+            popup.translationY - 24f * resources.displayMetrics.density,
+            -48f * resources.displayMetrics.density,
+        )
+        popup.animate().alpha(0f).translationY(targetY).setDuration(160L).withEndAction {
             runCatching { windowManager.removeView(popup) }
         }.start()
     }
