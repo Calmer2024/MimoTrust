@@ -22,6 +22,8 @@ DEFAULT_MODEL = "mimo-v2.5"
 DEFAULT_BASE_URL = "https://api.xiaomimimo.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 45.0
 DEFAULT_MAX_COMPLETION_TOKENS = 1200
+DEFAULT_SPEED_MAX_COMPLETION_TOKENS = 4_800
+DEFAULT_QUALITY_MAX_COMPLETION_TOKENS = 19_200
 MIN_QUERY_COUNT = 5
 MAX_QUERY_COUNT = 12
 ALLOWED_CHANNELS = frozenset({"网页", "学术"})
@@ -146,7 +148,12 @@ def build_planning_request(
         "MIMO_PLANNING_QUALITY_MAX_COMPLETION_TOKENS"
         if thinking == "enabled"
         else "MIMO_PLANNING_SPEED_MAX_COMPLETION_TOKENS",
-        max(4800, legacy_max_tokens) if thinking == "enabled" else legacy_max_tokens,
+        max(
+            DEFAULT_QUALITY_MAX_COMPLETION_TOKENS
+            if thinking == "enabled"
+            else DEFAULT_SPEED_MAX_COMPLETION_TOKENS,
+            legacy_max_tokens,
+        ),
     )
     today = current_date or date.today()
     system_prompt = _system_prompt()

@@ -146,6 +146,24 @@ def test_source_context_reaches_planning_and_triage_requests(monkeypatch) -> Non
     assert request["参数"]["max_completion_tokens"] == 12000
 
 
+def test_planning_mode_uses_separate_completion_budgets(monkeypatch) -> None:
+    claims = normalize_case_input(
+        {
+            "主题": "规划额度测试",
+            "主张": [{"文本": "待核验事实", "表达": "直接"}],
+        },
+        case_id="planning-budget-case",
+    )
+    monkeypatch.setenv("MIMO_PLANNING_SPEED_MAX_COMPLETION_TOKENS", "4800")
+    monkeypatch.setenv("MIMO_PLANNING_QUALITY_MAX_COMPLETION_TOKENS", "19200")
+
+    speed = build_planning_request(claims, thinking="disabled")
+    quality = build_planning_request(claims, thinking="enabled")
+
+    assert speed["参数"]["max_completion_tokens"] == 4800
+    assert quality["参数"]["max_completion_tokens"] == 19200
+
+
 def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
