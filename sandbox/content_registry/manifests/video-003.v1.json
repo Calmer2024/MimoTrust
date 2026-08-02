@@ -1,0 +1,66 @@
+{
+  "manifest_version": "1.0",
+  "provider": {
+    "provider_id": "mimotrust_sandbox"
+  },
+  "content": {
+    "content_type": "video",
+    "content_id": "video-003",
+    "content_version": "v1",
+    "content_hash": "b59a490694cbca44ea825cef9f1ff1bf148ee25490245332e5a361c533f3ccc4",
+    "canonical_url": "https://sandbox.mimotrust.local/content/video-003",
+    "title": "未成年人网络游戏防沉迷新规",
+    "author": "央视新闻",
+    "published_at": "2021-08-30T00:00:00+08:00",
+    "asset_order": ["video-main", "video-cover"]
+  },
+  "assets": [
+    {
+      "asset_id": "video-main",
+      "role": "analysis",
+      "mime_type": "video/mp4",
+      "source_url": "https://sourcecheckcheck.oss-cn-beijing.aliyuncs.com/%E6%9C%AA%E6%88%90%E5%B9%B4%E9%98%B2%E6%B2%89%E8%BF%B7.mp4",
+      "sha256": "b59a490694cbca44ea825cef9f1ff1bf148ee25490245332e5a361c533f3ccc4",
+      "size_bytes": 2415890,
+      "duration_ms": 28320,
+      "width": 720,
+      "height": 1066,
+      "video_codec": "H.264",
+      "audio_codec": "MP4A",
+      "derivation": "original",
+      "original_name": "未成年防沉迷.mp4",
+      "storage": {
+        "provider": "aliyun_oss",
+        "object_key": "未成年防沉迷.mp4",
+        "bucket": "sourcecheckcheck",
+        "endpoint": "oss-cn-beijing.aliyuncs.com"
+      }
+    },
+    {
+      "asset_id": "video-cover",
+      "role": "cover",
+      "mime_type": "image/png",
+      "source_url": "http://127.0.0.1:8787/assets/images/video-003-cover.png",
+      "sha256": "b65dabbbb717e54288d640cef25248732abb1d51949706473da151f678aa90d2",
+      "size_bytes": 449112,
+      "width": 711,
+      "height": 1068,
+      "derivation": "original",
+      "original_name": "未成年防沉迷.png",
+      "storage": {
+        "provider": "local",
+        "object_key": "assets/images/video-003-cover.png"
+      }
+    }
+  ],
+  "rights": {
+    "purpose": ["fact_check"],
+    "retention_seconds": 3600,
+    "redistribution_allowed": false
+  },
+  "sandbox": {
+    "access_enforcement": "mock_gateway_only",
+    "development_asset": true,
+    "notes": "开发期 OSS 域名仍含旧命名；正式演示前迁移到最终命名的私有 Bucket。"
+  }
+}

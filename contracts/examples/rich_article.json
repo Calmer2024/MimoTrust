@@ -1,0 +1,30 @@
+{
+  "schema_version": "2.1",
+  "event_id": "797d8c84-e627-4bb4-bbbb-b41596cc80df",
+  "trigger": "share",
+  "source_app": "mimotrust_controlled_content",
+  "provider": {
+    "provider_id": "mimotrust_sandbox",
+    "application_id": "com.mimotrust.controlledcontent"
+  },
+  "content_ref": {
+    "content_type": "rich_article",
+    "content_id": "rich-article-001",
+    "content_version": "v1",
+    "content_hash": "8ea92821dc3e87d49c81982ff4b79051e3b81168088b3b22194eda4292bf4c03",
+    "canonical_url": "https://sandbox.mimotrust.local/content/rich-article-001"
+  },
+  "content_access": {
+    "mode": "grant_exchange",
+    "exchange_url": "https://gateway.mimotrust.local/v1/grants/exchange",
+    "grant_code": "demo-grant-rich-article-001",
+    "audience": "mimotrust_guardian_backend",
+    "expires_at": "2026-08-01T20:03:00+08:00",
+    "scopes": ["manifest:read", "asset:read"]
+  },
+  "view_state": {
+    "scroll_ratio": 0.58,
+    "block_index": 4
+  },
+  "observed_at": "2026-08-01T20:00:00+08:00"
+}

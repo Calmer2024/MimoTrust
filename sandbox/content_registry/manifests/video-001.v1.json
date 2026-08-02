@@ -1,0 +1,72 @@
+{
+  "manifest_version": "1.0",
+  "provider": {
+    "provider_id": "mimotrust_sandbox"
+  },
+  "content": {
+    "content_type": "video",
+    "content_id": "video-001",
+    "content_version": "v1",
+    "content_hash": "0f6c57d2f3f2772a3abfde87b52123c45228a420e40cada19035dd26afa2f734",
+    "canonical_url": "https://sandbox.mimotrust.local/content/video-001",
+    "title": "SkyNomad 澎程事故传言",
+    "author": "自媒体",
+    "published_at": "2026-07-10T00:00:00+08:00",
+    "asset_order": ["video-main", "video-cover"]
+  },
+  "assets": [
+    {
+      "asset_id": "video-main",
+      "role": "analysis",
+      "mime_type": "video/mp4",
+      "source_url": "https://sourcecheckcheck.oss-cn-beijing.aliyuncs.com/skynomad%E8%B0%A3%E8%A8%80.mp4",
+      "sha256": "0f6c57d2f3f2772a3abfde87b52123c45228a420e40cada19035dd26afa2f734",
+      "size_bytes": 2423227,
+      "duration_ms": 22467,
+      "width": 720,
+      "height": 1280,
+      "frame_rate": 30.0,
+      "video_codec": "H.264",
+      "audio_codec": "MP4A",
+      "derivation": "original",
+      "original_name": "skynomad谣言.mp4",
+      "storage": {
+        "provider": "aliyun_oss",
+        "object_key": "skynomad谣言.mp4",
+        "bucket": "sourcecheckcheck",
+        "endpoint": "oss-cn-beijing.aliyuncs.com"
+      },
+      "http": {
+        "accept_ranges": true,
+        "etag": "2336E673EE165F8490C846733CE040ED",
+        "last_modified": "Tue, 28 Jul 2026 09:02:55 GMT"
+      }
+    },
+    {
+      "asset_id": "video-cover",
+      "role": "cover",
+      "mime_type": "image/png",
+      "source_url": "http://127.0.0.1:8787/assets/images/video-001-cover.png",
+      "sha256": "fbab89e52a3f70d657ae4c279ef3513acdbbcc1b0794c818ea99b7361dd19383",
+      "size_bytes": 634670,
+      "width": 714,
+      "height": 1266,
+      "derivation": "original",
+      "original_name": "skynomad谣言.png",
+      "storage": {
+        "provider": "local",
+        "object_key": "assets/images/video-001-cover.png"
+      }
+    }
+  ],
+  "rights": {
+    "purpose": ["fact_check"],
+    "retention_seconds": 3600,
+    "redistribution_allowed": false
+  },
+  "sandbox": {
+    "access_enforcement": "mock_gateway_only",
+    "development_asset": true,
+    "notes": "开发期 OSS 域名仍含旧命名；正式演示前迁移到最终命名的私有 Bucket。"
+  }
+}

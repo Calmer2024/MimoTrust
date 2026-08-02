@@ -1,0 +1,46 @@
+{
+  "registry_version": "1.0",
+  "provider_id": "mimotrust_sandbox",
+  "updated_at": "2026-08-02T01:20:00+08:00",
+  "contents": [
+    {
+      "content_id": "video-001",
+      "content_version": "v1",
+      "content_type": "video",
+      "status": "active",
+      "display_order": 0,
+      "manifest_path": "manifests/video-001.v1.json",
+      "display_metrics": {
+        "like_count": 1284,
+        "comment_count": 86,
+        "share_count": 214
+      }
+    },
+    {
+      "content_id": "video-002",
+      "content_version": "v1",
+      "content_type": "video",
+      "status": "active",
+      "display_order": 1,
+      "manifest_path": "manifests/video-002.v1.json",
+      "display_metrics": {
+        "like_count": 936,
+        "comment_count": 42,
+        "share_count": 118
+      }
+    },
+    {
+      "content_id": "video-003",
+      "content_version": "v1",
+      "content_type": "video",
+      "status": "active",
+      "display_order": 2,
+      "manifest_path": "manifests/video-003.v1.json",
+      "display_metrics": {
+        "like_count": 2456,
+        "comment_count": 173,
+        "share_count": 367
+      }
+    }
+  ]
+}
