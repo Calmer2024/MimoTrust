@@ -9,5 +9,6 @@ data/trust/
 cookies*.txt
 android/local.properties
 android/.gradle/
+android/.kotlin/
 android/app/build/
 sandbox/content_gateway/*.log

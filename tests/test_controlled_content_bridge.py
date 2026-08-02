@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SANDBOX_ACTIVITY = ROOT / "sandbox/mimotrust_controlled_content/android/app/src/main/kotlin/com/mimotrust/controlledcontent/MainActivity.kt"
 GUARDIAN_CONTRACT = ROOT / "android/app/src/main/java/com/mimotrust/xiaozhen/overlay/ControlledContentContract.kt"
 GUARDIAN_RECEIVER = ROOT / "android/app/src/main/java/com/mimotrust/xiaozhen/overlay/ControlledContentReceiver.kt"
+ANDROID_BUILD = ROOT / "android/app/build.gradle.kts"
 
 
 def test_context_22_identifiers_match_across_apps() -> None:
@@ -49,3 +50,10 @@ def test_comment_and_share_candidates_do_not_issue_grants() -> None:
     assert "ContentContext.deferred" in candidate_body
     assert "issueGrant" not in candidate_body
     assert "'mode': 'deferred_grant'" in model
+
+
+def test_android_default_backend_uses_adb_reverse_loopback() -> None:
+    build = ANDROID_BUILD.read_text(encoding="utf-8")
+
+    assert '.orElse("http://127.0.0.1:8000/")' in build
+    assert '.orElse("http://10.0.2.2:8000/")' not in build

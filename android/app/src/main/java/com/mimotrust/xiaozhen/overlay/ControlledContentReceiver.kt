@@ -28,6 +28,7 @@ class ControlledContentReceiver : BroadcastReceiver() {
         val grant = ControlledContentContract.parse(payload) ?: return
         if (!ControlledContentRequestCoordinator.consume(context, grant.eventId)) return
         Log.i(LOG_TAG, "GUARDIAN_CONTEXT_ACCEPTED event_id=${grant.eventId} content_id=${grant.contentId}")
+        FloatingBallManager.resolving(context)
         val pending = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching {

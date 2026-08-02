@@ -104,7 +104,12 @@ object ControlledContentRequestCoordinator {
 
     fun isPending(context: Context, requestId: String): Boolean {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_PENDING_ID, null) == requestId &&
-            System.currentTimeMillis() - prefs.getLong(KEY_PENDING_AT, 0L) <= RESPONSE_TIMEOUT_MS
+        return prefs.getString(KEY_PENDING_ID, null) == requestId
+    }
+
+    fun cancel(context: Context, requestId: String) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getString(KEY_PENDING_ID, null) != requestId) return
+        prefs.edit().remove(KEY_PENDING_ID).remove(KEY_PENDING_AT).apply()
     }
 }

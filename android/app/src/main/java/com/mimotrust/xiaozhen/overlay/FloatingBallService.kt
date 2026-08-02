@@ -17,6 +17,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.os.IBinder
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -46,6 +47,7 @@ class FloatingBallService : Service() {
     private var ballView: FloatingBallView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var activeJobId: String? = null
+    private var requestInFlight = false
     private var jobsCollector: Job? = null
 
     override fun onCreate() {
@@ -58,8 +60,16 @@ class FloatingBallService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_ATTENTION -> ballView?.setState(FloatingBallState.Attention, 0)
-            ACTION_FAILED -> ballView?.setState(FloatingBallState.Failed, 0)
+            ACTION_ATTENTION -> if (!requestInFlight && activeJobId == null) {
+                ballView?.setState(FloatingBallState.Attention, 0)
+            }
+            ACTION_RESOLVING -> {
+                ballView?.setState(FloatingBallState.Resolving, REQUEST_ACCEPTED_PROGRESS)
+            }
+            ACTION_FAILED -> {
+                requestInFlight = false
+                ballView?.setState(FloatingBallState.Failed, 0)
+            }
         }
         return START_STICKY
     }
@@ -104,12 +114,20 @@ class FloatingBallService : Service() {
             openApp(activeJobId)
             return
         }
+        if (requestInFlight) {
+            Toast.makeText(this, "正在获取当前视频，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
+        requestInFlight = true
         val requestId = ControlledContentRequestCoordinator.request(this)
-        ballView?.setState(FloatingBallState.Attention, 0)
+        Log.i(LOG_TAG, "CONTENT_CONTEXT_REQUEST_SENT request_id=$requestId")
+        ballView?.setState(FloatingBallState.Queued, REQUEST_SENT_PROGRESS)
         ballView?.postDelayed({
             if (ControlledContentRequestCoordinator.isPending(this, requestId)) {
+                ControlledContentRequestCoordinator.cancel(this, requestId)
+                requestInFlight = false
                 ballView?.setState(FloatingBallState.Failed, 0)
-                Toast.makeText(this, "未获取到当前视频，请保持临时视频平台在前台后重试", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "未获取到当前视频，请保持视频平台在前台后重试", Toast.LENGTH_LONG).show()
             }
         }, ControlledContentRequestCoordinator.RESPONSE_TIMEOUT_MS)
     }
@@ -120,6 +138,7 @@ class FloatingBallService : Service() {
                 val tracked = activeJobId?.let { id -> jobs.firstOrNull { it.jobId == id } }
                     ?: jobs.firstOrNull { it.status == "queued" || it.status == "running" }
                 if (tracked != null) {
+                    requestInFlight = false
                     val isNewJob = tracked.jobId != activeJobId
                     activeJobId = tracked.jobId
                     ballView?.post {
@@ -214,7 +233,11 @@ class FloatingBallService : Service() {
 
     companion object {
         const val ACTION_ATTENTION = "com.mimotrust.xiaozhen.action.FLOATING_BALL_ATTENTION"
+        const val ACTION_RESOLVING = "com.mimotrust.xiaozhen.action.FLOATING_BALL_RESOLVING"
         const val ACTION_FAILED = "com.mimotrust.xiaozhen.action.FLOATING_BALL_FAILED"
+        private const val LOG_TAG = "MiMoTrustGuardian"
+        private const val REQUEST_SENT_PROGRESS = 6
+        private const val REQUEST_ACCEPTED_PROGRESS = 14
         private const val CHANNEL_ID = "mimo_floating_ball"
         private const val NOTIFICATION_ID = 9101
     }
