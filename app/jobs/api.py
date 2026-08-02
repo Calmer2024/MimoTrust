@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Header, HTTPException, Response, status
+from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile, status
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
-from app.jobs.models import CreateJobRequest, CreateJobResponse, JobView, utc_now
+from app.jobs.models import CreateJobRequest, CreateJobResponse, JobSource, JobView, utc_now
 from app.jobs.runtime import runtime
+from app.jobs.uploads import UploadBundleError, cleanup_upload_bundle, stage_upload_bundle
 
 
 router = APIRouter(prefix="/v1/jobs", tags=["mobile-jobs"])
@@ -20,6 +21,47 @@ def _device_id(value: str | None) -> str:
 @router.post("", response_model=CreateJobResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_job(request: CreateJobRequest, x_device_id: str | None = Header(default=None)) -> CreateJobResponse:
     job, reused = await runtime.create(request, _device_id(x_device_id))
+    return CreateJobResponse(
+        job_id=job.job_id,
+        status=job.status,
+        created_at=job.created_at,
+        event_url=f"/v1/jobs/{job.job_id}/events",
+        reused=reused,
+    )
+
+
+@router.post("/upload", response_model=CreateJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def create_upload_job(
+    title: str = Form(default="手动多模态核验", max_length=200),
+    text: str = Form(default="", max_length=50_000),
+    files: list[UploadFile] = File(default=[]),
+    mode: str = Form(default="auto", pattern="^(auto|visual)$"),
+    verification_mode: str = Form(default="speed", pattern="^(speed|quality)$"),
+    client_request_id: str = Form(min_length=8, max_length=100),
+    x_device_id: str | None = Header(default=None),
+) -> CreateJobResponse:
+    try:
+        bundle_id = await stage_upload_bundle(title, text, files)
+    except UploadBundleError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    request = CreateJobRequest(
+        source=JobSource(
+            type="upload_bundle",
+            value=bundle_id,
+            platform_hint="user_upload",
+        ),
+        mode=mode,
+        verification_mode=verification_mode,
+        client_request_id=client_request_id,
+    )
+    try:
+        job, reused = await runtime.create(request, _device_id(x_device_id))
+    except Exception:
+        cleanup_upload_bundle(bundle_id)
+        raise
+    if reused:
+        cleanup_upload_bundle(bundle_id)
     return CreateJobResponse(
         job_id=job.job_id,
         status=job.status,

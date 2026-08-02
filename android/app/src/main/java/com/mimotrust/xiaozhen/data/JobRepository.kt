@@ -1,5 +1,8 @@
 package com.mimotrust.xiaozhen.data
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import com.google.gson.Gson
 import com.mimotrust.xiaozhen.BuildConfig
 import com.mimotrust.xiaozhen.data.local.JobDao
@@ -17,10 +20,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import okio.BufferedSink
+import okio.source
 
 class JobRepository(
     private val api: MimoApi,
@@ -28,6 +37,7 @@ class JobRepository(
     private val dao: JobDao,
     private val notifier: VerificationNotifier,
     private val deviceId: String,
+    private val context: Context,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val gson = Gson()
@@ -54,9 +64,69 @@ class JobRepository(
                 clientRequestId = clientRequestId,
             ),
         )
+        persistQueuedJob(response, text)
+        return response.jobId
+    }
+
+    suspend fun createUploadJob(
+        text: String,
+        attachments: List<LocalAttachment>,
+        clientRequestId: String,
+        verificationMode: String = "speed",
+    ): String {
+        require(text.isNotBlank() || attachments.isNotEmpty())
+        require(attachments.size <= 12)
+        val parts = attachments.mapIndexed { index, attachment ->
+            attachmentPart(attachment, index + 1)
+        }
+        val response = api.createUploadJob(
+            deviceId = deviceId,
+            title = formValue("手动多模态核验"),
+            text = formValue(text),
+            mode = formValue("auto"),
+            verificationMode = formValue(verificationMode),
+            clientRequestId = formValue(clientRequestId),
+            files = parts,
+        )
+        val attachmentSummary = buildList {
+            val imageCount = attachments.count {
+                (it.mimeType ?: it.uri?.let(context.contentResolver::getType))
+                    ?.startsWith("image/") == true
+            }
+            val videoCount = attachments.size - imageCount
+            if (imageCount > 0) add("图片 $imageCount 张")
+            if (videoCount > 0) add("视频 $videoCount 个")
+        }.joinToString(" · ")
+        val sourceText = listOf(text.trim(), attachmentSummary)
+            .filter(String::isNotBlank)
+            .joinToString("\n")
+        val storedAttachments = attachments.mapNotNull { attachment ->
+            attachment.uri?.let { uri ->
+                StoredAttachment(
+                    uri = uri.toString(),
+                    filename = attachment.filename ?: displayName(uri) ?: "附件",
+                    mimeType = attachment.mimeType
+                        ?: context.contentResolver.getType(uri)
+                        ?: "application/octet-stream",
+                )
+            }
+        }
+        persistQueuedJob(
+            response,
+            sourceText,
+            gson.toJson(storedAttachments),
+        )
+        return response.jobId
+    }
+
+    private suspend fun persistQueuedJob(
+        response: com.mimotrust.xiaozhen.data.remote.CreateJobResponseDto,
+        sourceText: String,
+        attachmentsJson: String? = null,
+    ) {
         val queuedJob = JobEntity(
                 jobId = response.jobId,
-                sourceText = text.take(500),
+                sourceText = sourceText.take(500),
                 status = response.status,
                 stage = "queued",
                 displayText = "小真已接收，等待开始核验",
@@ -64,12 +134,46 @@ class JobRepository(
                 sequence = 0,
                 elapsedMs = 0,
                 createdAt = response.createdAt,
+                attachmentsJson = attachmentsJson,
             )
         dao.upsert(queuedJob)
         notifier.showQueued(queuedJob)
         observeEvents(response.jobId)
-        return response.jobId
     }
+
+    private fun attachmentPart(
+        attachment: LocalAttachment,
+        index: Int,
+    ): MultipartBody.Part {
+        val resolver = context.contentResolver
+        val mimeType = attachment.mimeType
+            ?: attachment.uri?.let(resolver::getType)
+            ?: "application/octet-stream"
+        val filename = attachment.filename
+            ?: attachment.uri?.let { displayName(it) }
+            ?: "upload-$index"
+        val body = attachment.bytes?.toRequestBody(mimeType.toMediaTypeOrNull())
+            ?: ContentUriRequestBody(
+                context = context,
+                uri = requireNotNull(attachment.uri),
+                mimeType = mimeType,
+            )
+        return MultipartBody.Part.createFormData("files", filename, body)
+    }
+
+    private fun displayName(uri: Uri): String? = context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null,
+    )?.use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        cursor.getString(0)
+    }
+
+    private fun formValue(value: String): RequestBody =
+        value.toRequestBody("text/plain; charset=utf-8".toMediaTypeOrNull())
 
     suspend fun reconnectActiveJobs() {
         dao.active().forEach { observeEvents(it.jobId) }
@@ -315,6 +419,28 @@ class JobRepository(
         if (payload == null) return existing
         val line = gson.toJson(payload)
         return ((existing ?: "") + line + "\n").takeLast(300_000)
+    }
+}
+
+private class ContentUriRequestBody(
+    private val context: Context,
+    private val uri: Uri,
+    mimeType: String,
+) : RequestBody() {
+    private val mediaType = mimeType.toMediaTypeOrNull()
+
+    override fun contentType() = mediaType
+
+    override fun contentLength(): Long = context.contentResolver
+        .openAssetFileDescriptor(uri, "r")
+        ?.use { it.length }
+        ?: -1L
+
+    override fun writeTo(sink: BufferedSink) {
+        val input = checkNotNull(context.contentResolver.openInputStream(uri)) {
+            "Unable to open selected attachment"
+        }
+        input.source().use { source -> sink.writeAll(source) }
     }
 }
 

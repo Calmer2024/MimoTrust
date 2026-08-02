@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mimotrust.xiaozhen.data.JobRepository
+import com.mimotrust.xiaozhen.data.LocalAttachment
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -16,14 +17,24 @@ class MainViewModel(private val repository: JobRepository) : ViewModel() {
 
     init { viewModelScope.launch { repository.reconnectActiveJobs() } }
 
-    fun verify(text: String, verificationMode: String) {
-        if (text.isBlank()) return
+    fun verify(
+        text: String,
+        attachments: List<LocalAttachment>,
+        verificationMode: String,
+    ) {
+        if (text.isBlank() && attachments.isEmpty()) return
         viewModelScope.launch {
-            repository.createSharedJob(
-                text.trim(),
-                UUID.randomUUID().toString(),
-                verificationMode,
-            )
+            val requestId = UUID.randomUUID().toString()
+            if (attachments.isEmpty()) {
+                repository.createSharedJob(text.trim(), requestId, verificationMode)
+            } else {
+                repository.createUploadJob(
+                    text.trim(),
+                    attachments,
+                    requestId,
+                    verificationMode,
+                )
+            }
         }
     }
 }

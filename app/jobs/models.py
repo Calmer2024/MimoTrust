@@ -26,7 +26,9 @@ def utc_now() -> datetime:
 
 
 class JobSource(BaseModel):
-    type: Literal["shared_url", "agent_context", "platform_api"] = "shared_url"
+    type: Literal[
+        "shared_url", "agent_context", "platform_api", "upload_bundle"
+    ] = "shared_url"
     value: str = Field(min_length=1, max_length=10_000)
     platform_hint: str | None = Field(default=None, max_length=50)
 

@@ -31,5 +31,6 @@ data class JobEntity(
     val reportDraft: String? = null,
     val reportJson: String? = null,
     val processArtifacts: String? = null,
+    val attachmentsJson: String? = null,
 )
 

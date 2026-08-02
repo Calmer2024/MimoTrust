@@ -20,6 +20,7 @@ class MimoTrustApplication : Application() {
                 MimoDatabase.MIGRATION_3_4,
                 MimoDatabase.MIGRATION_4_5,
                 MimoDatabase.MIGRATION_5_6,
+                MimoDatabase.MIGRATION_6_7,
             )
             .build()
         val notifier = VerificationNotifier(this)
@@ -30,6 +31,7 @@ class MimoTrustApplication : Application() {
             dao = database.jobs(),
             notifier = notifier,
             deviceId = DeviceIdentity.get(this),
+            context = this,
         )
     }
 }

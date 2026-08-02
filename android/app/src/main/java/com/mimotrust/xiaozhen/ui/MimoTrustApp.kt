@@ -4,8 +4,13 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.speech.RecognizerIntent
+import android.widget.MediaController
+import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
@@ -45,6 +50,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -72,6 +78,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
@@ -106,8 +113,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mimotrust.xiaozhen.R
+import com.mimotrust.xiaozhen.data.LocalAttachment
+import com.mimotrust.xiaozhen.data.StoredAttachment
 import com.mimotrust.xiaozhen.data.local.JobEntity
 import com.mimotrust.xiaozhen.data.remote.VerificationDetailsDto
 import com.mimotrust.xiaozhen.data.remote.ClaimCheckDto
@@ -116,12 +128,17 @@ import com.mimotrust.xiaozhen.data.remote.JobEventPayloadDto
 import com.mimotrust.xiaozhen.overlay.FloatingBallManager
 import com.composables.icons.lucide.*
 import com.google.gson.Gson
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.net.URI
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.PI
@@ -215,7 +232,7 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
 @Composable
 private fun ChatScreen(
     jobs: List<JobEntity>,
-    onVerify: (String, String) -> Unit,
+    onVerify: (String, List<LocalAttachment>, String) -> Unit,
     onOpen: (JobEntity) -> Unit,
     listState: LazyListState,
     composerBottomInset: Dp,
@@ -226,7 +243,7 @@ private fun ChatScreen(
         context.getSharedPreferences("mimo-ui", Context.MODE_PRIVATE)
     }
     var input by remember { mutableStateOf("") }
-    var photo by remember { mutableStateOf<Bitmap?>(null) }
+    var attachments by remember { mutableStateOf<List<LocalAttachment>>(emptyList()) }
     var verificationMode by remember {
         mutableStateOf(
             preferences.getString("verification-mode", "speed")
@@ -234,7 +251,6 @@ private fun ChatScreen(
                 ?: "speed"
         )
     }
-    var videoUri by remember { mutableStateOf<Uri?>(null) }
     var waitingForNewMessage by remember { mutableStateOf(false) }
     var newestJobBeforeSend by remember { mutableStateOf<String?>(null) }
     val visibleJobs = jobs.take(3).reversed()
@@ -244,19 +260,43 @@ private fun ChatScreen(
         }
     }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        photo = bitmap
+        bitmap?.let { captured ->
+            context.saveCameraAttachment(captured)?.let { attachment ->
+                attachments = (attachments + attachment).take(12)
+            }
+        }
     }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        videoUri = uri
+        uri?.let {
+            context.persistAttachmentAccess(it)
+            attachments = (attachments + context.toLocalAttachment(it))
+                .distinctBy { item -> item.uri }
+                .take(12)
+        }
+    }
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
+    ) { uris ->
+        uris.forEach(context::persistAttachmentAccess)
+        attachments = (attachments + uris.map(context::toLocalAttachment))
+            .distinctBy { it.uri }
+            .take(12)
+    }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach(context::persistAttachmentAccess)
+        attachments = (attachments + uris.map(context::toLocalAttachment))
+            .distinctBy { it.uri }
+            .take(12)
     }
     val send = {
-        if (input.isNotBlank()) {
+        if (input.isNotBlank() || attachments.isNotEmpty()) {
             newestJobBeforeSend = jobs.firstOrNull()?.jobId
             waitingForNewMessage = true
-            onVerify(input.trim(), verificationMode)
+            onVerify(input.trim(), attachments, verificationMode)
             input = ""
-            photo = null
-            videoUri = null
+            attachments = emptyList()
         }
     }
     val activeJob = jobs.firstOrNull { it.status == "queued" || it.status == "running" }
@@ -309,12 +349,18 @@ private fun ChatScreen(
             ChatComposer(
                 value = input,
                 onValueChange = { input = it },
-                photo = photo,
-                videoUri = videoUri,
-                onClearPhoto = { photo = null },
-                onClearVideo = { videoUri = null },
+                attachments = attachments,
+                onRemoveAttachment = { target ->
+                    attachments = attachments.filterNot { it === target }
+                },
                 onCamera = { cameraLauncher.launch(null) },
+                onPickImages = {
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
                 onPickVideo = { videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                onPickFiles = { filePicker.launch(arrayOf("image/*", "video/*")) },
                 onVoice = {
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -492,42 +538,30 @@ private fun StartPrompt(onPick: (String) -> Unit) {
 private fun ChatComposer(
     value: String,
     onValueChange: (String) -> Unit,
-    photo: Bitmap?,
-    videoUri: Uri?,
-    onClearPhoto: () -> Unit,
-    onClearVideo: () -> Unit,
+    attachments: List<LocalAttachment>,
+    onRemoveAttachment: (LocalAttachment) -> Unit,
     onCamera: () -> Unit,
+    onPickImages: () -> Unit,
     onPickVideo: () -> Unit,
+    onPickFiles: () -> Unit,
     onVoice: () -> Unit,
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var previewAttachment by remember { mutableStateOf<LocalAttachment?>(null) }
+    var attachmentMenuExpanded by remember { mutableStateOf(false) }
+    val canSend = value.isNotBlank() || attachments.isNotEmpty()
     Column(
         modifier = modifier.fillMaxWidth().imePadding()
             .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp),
     ) {
-        if (photo != null) {
-            Row(
-                Modifier.padding(start = 12.dp, bottom = 8.dp).clip(RoundedCornerShape(16.dp)).background(SurfaceSoft)
-                    .clickable(onClick = onClearPhoto).padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Image(photo.asImageBitmap(), "待核实照片", Modifier.size(42.dp).clip(RoundedCornerShape(11.dp)), contentScale = ContentScale.Crop)
-                Spacer(Modifier.width(8.dp))
-                Text("已添加照片 · 点击移除", fontSize = 12.sp, color = Muted)
-                Spacer(Modifier.width(8.dp))
-            }
-        }
-        if (videoUri != null) {
-            Row(
-                Modifier.padding(start = 12.dp, bottom = 8.dp).clip(RoundedCornerShape(16.dp)).background(Color.White)
-                    .clickable(onClick = onClearVideo).padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Lucide.Video, null, tint = Cocoa, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("已选择相册视频 · 点击移除", fontSize = 12.sp, color = Muted)
-            }
+        if (attachments.isNotEmpty()) {
+            AttachmentStrip(
+                attachments = attachments,
+                onOpen = { previewAttachment = it },
+                onRemove = onRemoveAttachment,
+                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, bottom = 8.dp),
+            )
         }
         Row(
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp))
@@ -551,26 +585,338 @@ private fun ChatComposer(
                     }
                 },
             )
-            IconButton(onClick = onVoice, modifier = Modifier.size(48.dp)) {
-                Icon(Lucide.AudioLines, "语音输入", tint = Cocoa, modifier = Modifier.size(21.dp))
+            Box {
+                IconButton(
+                    onClick = { attachmentMenuExpanded = true },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(Lucide.Plus, "添加图片或视频", tint = Cocoa, modifier = Modifier.size(24.dp))
+                }
+                DropdownMenu(
+                    expanded = attachmentMenuExpanded,
+                    onDismissRequest = { attachmentMenuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("选择图片") },
+                        leadingIcon = { Icon(Lucide.Images, null) },
+                        onClick = {
+                            attachmentMenuExpanded = false
+                            onPickImages()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("选择视频") },
+                        leadingIcon = { Icon(Lucide.Video, null) },
+                        onClick = {
+                            attachmentMenuExpanded = false
+                            onPickVideo()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("从文件选择") },
+                        leadingIcon = { Icon(Lucide.FolderOpen, null) },
+                        onClick = {
+                            attachmentMenuExpanded = false
+                            onPickFiles()
+                        },
+                    )
+                }
             }
-            IconButton(onClick = onPickVideo, modifier = Modifier.size(48.dp)) {
-                Icon(Lucide.Plus, "从相册选择视频", tint = Cocoa, modifier = Modifier.size(24.dp))
+            IconButton(
+                onClick = if (canSend) onSend else onVoice,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    if (canSend) Lucide.ArrowUp else Lucide.AudioLines,
+                    if (canSend) "发送" else "语音输入",
+                    tint = Cocoa,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+        }
+    }
+    previewAttachment?.uri?.let { uri ->
+        AttachmentPreviewDialog(
+            uri = uri,
+            mimeType = previewAttachment?.mimeType,
+            filename = previewAttachment?.filename,
+            onDismiss = { previewAttachment = null },
+        )
+    }
+}
+
+@Composable
+private fun AttachmentStrip(
+    attachments: List<LocalAttachment>,
+    onOpen: (LocalAttachment) -> Unit,
+    onRemove: ((LocalAttachment) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    LazyRow(
+        modifier = modifier.height(82.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(end = 8.dp),
+    ) {
+        items(
+            items = attachments,
+            key = { attachment -> attachment.uri?.toString() ?: attachment.filename.orEmpty() },
+        ) { attachment ->
+            AttachmentTile(
+                uri = attachment.uri,
+                mimeType = attachment.mimeType,
+                filename = attachment.filename,
+                onOpen = { onOpen(attachment) },
+                onRemove = onRemove?.let { remove -> { remove(attachment) } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun StoredAttachmentStrip(
+    attachments: List<StoredAttachment>,
+    modifier: Modifier = Modifier,
+) {
+    var previewAttachment by remember { mutableStateOf<StoredAttachment?>(null) }
+    LazyRow(
+        modifier = modifier.height(82.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(attachments, key = { it.uri }) { attachment ->
+            AttachmentTile(
+                uri = Uri.parse(attachment.uri),
+                mimeType = attachment.mimeType,
+                filename = attachment.filename,
+                onOpen = { previewAttachment = attachment },
+                onRemove = null,
+            )
+        }
+    }
+    previewAttachment?.let { attachment ->
+        AttachmentPreviewDialog(
+            uri = Uri.parse(attachment.uri),
+            mimeType = attachment.mimeType,
+            filename = attachment.filename,
+            onDismiss = { previewAttachment = null },
+        )
+    }
+}
+
+@Composable
+private fun AttachmentTile(
+    uri: Uri?,
+    mimeType: String?,
+    filename: String?,
+    onOpen: () -> Unit,
+    onRemove: (() -> Unit)?,
+) {
+    val context = LocalContext.current
+    val resolvedMime = mimeType ?: uri?.let(context.contentResolver::getType).orEmpty()
+    val preview by produceState<Bitmap?>(initialValue = null, uri, resolvedMime) {
+        value = uri?.let { loadAttachmentPreview(context, it, resolvedMime, 720) }
+    }
+    Box(
+        modifier = Modifier.size(76.dp).clip(RoundedCornerShape(14.dp))
+            .background(SurfaceSoft).clickable(onClick = onOpen),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (preview != null) {
+            Image(
+                bitmap = preview!!.asImageBitmap(),
+                contentDescription = filename ?: "附件预览",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Icon(
+                if (resolvedMime.startsWith("video/")) Lucide.Video else Lucide.Image,
+                contentDescription = filename,
+                tint = Cocoa,
+                modifier = Modifier.size(25.dp),
+            )
+        }
+        if (resolvedMime.startsWith("video/")) {
+            Box(
+                Modifier.align(Alignment.Center).size(28.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = .55f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Lucide.Play, "播放视频", tint = Color.White, modifier = Modifier.size(15.dp))
+            }
+        }
+        if (onRemove != null) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(4.dp).size(22.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = .58f)).clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Lucide.X, "移除附件", tint = Color.White, modifier = Modifier.size(13.dp))
             }
         }
     }
 }
 
 @Composable
+private fun AttachmentPreviewDialog(
+    uri: Uri,
+    mimeType: String?,
+    filename: String?,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    val resolvedMime = mimeType ?: context.contentResolver.getType(uri).orEmpty()
+    val image by produceState<Bitmap?>(initialValue = null, uri, resolvedMime) {
+        value = if (resolvedMime.startsWith("video/")) null
+        else loadAttachmentPreview(context, uri, resolvedMime, 1600)
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            if (resolvedMime.startsWith("video/")) {
+                AndroidView(
+                    factory = { viewContext ->
+                        VideoView(viewContext).apply {
+                            val controls = MediaController(viewContext)
+                            controls.setAnchorView(this)
+                            setMediaController(controls)
+                            setVideoURI(uri)
+                            setOnPreparedListener { player ->
+                                player.isLooping = false
+                                start()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (image != null) {
+                Image(
+                    bitmap = image!!.asImageBitmap(),
+                    contentDescription = filename ?: "图片预览",
+                    modifier = Modifier.fillMaxSize().padding(vertical = 56.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            } else {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp)
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).size(44.dp)
+                    .clip(CircleShape).background(Color.White.copy(alpha = .14f)),
+            ) {
+                Icon(Lucide.X, "关闭预览", tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+            if (!filename.isNullOrBlank()) {
+                Text(
+                    filename,
+                    color = Color.White.copy(alpha = .82f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp),
+                )
+            }
+        }
+    }
+}
+
+private suspend fun loadAttachmentPreview(
+    context: Context,
+    uri: Uri,
+    mimeType: String,
+    maxDimension: Int,
+): Bitmap? = withContext(Dispatchers.IO) {
+    runCatching {
+        if (mimeType.startsWith("video/")) {
+            MediaMetadataRetriever().use { retriever ->
+                retriever.setDataSource(context, uri)
+                retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample }
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, options)
+            }
+        }
+    }.getOrNull()
+}
+
+private fun Context.toLocalAttachment(uri: Uri): LocalAttachment = LocalAttachment(
+    uri = uri,
+    filename = attachmentDisplayName(uri),
+    mimeType = contentResolver.getType(uri),
+)
+
+private fun Context.attachmentDisplayName(uri: Uri): String? = contentResolver.query(
+    uri,
+    arrayOf(OpenableColumns.DISPLAY_NAME),
+    null,
+    null,
+    null,
+)?.use { cursor ->
+    if (cursor.moveToFirst()) cursor.getString(0) else null
+}
+
+private fun Context.persistAttachmentAccess(uri: Uri) {
+    runCatching {
+        contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+        )
+    }
+}
+
+private fun Context.saveCameraAttachment(bitmap: Bitmap): LocalAttachment? = runCatching {
+    val directory = File(filesDir, "attachments").apply { mkdirs() }
+    val filename = "camera-${System.currentTimeMillis()}.jpg"
+    val file = File(directory, filename)
+    FileOutputStream(file).use { output ->
+        check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output))
+    }
+    LocalAttachment(
+        uri = FileProvider.getUriForFile(this, "$packageName.files", file),
+        filename = filename,
+        mimeType = "image/jpeg",
+    )
+}.getOrNull()
+
+@Composable
 private fun ConversationTurn(job: JobEntity, onOpen: (JobEntity) -> Unit) {
+    val sentAttachments = remember(job.attachmentsJson) {
+        runCatching {
+            Gson().fromJson(job.attachmentsJson, Array<StoredAttachment>::class.java)?.toList()
+        }.getOrNull().orEmpty()
+    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-            Box(
+            Column(
                 Modifier.widthIn(max = 300.dp).clip(
                     RoundedCornerShape(topStart = 22.dp, topEnd = 8.dp, bottomStart = 22.dp, bottomEnd = 22.dp),
-                ).background(Cocoa).padding(horizontal = 16.dp, vertical = 12.dp),
+                ).background(Cocoa).padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Text(job.sourceText, color = Color.White, fontSize = 14.sp, lineHeight = 20.sp, maxLines = 5, overflow = TextOverflow.Ellipsis)
+                if (sentAttachments.isNotEmpty()) {
+                    StoredAttachmentStrip(
+                        attachments = sentAttachments,
+                        modifier = Modifier.widthIn(max = 284.dp),
+                    )
+                }
+                Text(
+                    job.sourceText,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
             Spacer(Modifier.height(5.dp))
             Text(formatMessageTime(job.createdAt), color = LightMuted, fontSize = 10.sp)

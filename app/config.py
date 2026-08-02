@@ -63,6 +63,9 @@ class Settings:
     ).strip()
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
     job_queue_name: str = os.getenv("JOB_QUEUE_NAME", "mimotrust:jobs").strip()
+    job_upload_dir: str = os.getenv(
+        "JOB_UPLOAD_DIR", ".cache/job-uploads"
+    ).strip()
     s3_endpoint_url: str = os.getenv("S3_ENDPOINT_URL", "").strip()
     s3_access_key: str = os.getenv("S3_ACCESS_KEY", "").strip()
     s3_secret_key: str = os.getenv("S3_SECRET_KEY", "").strip()

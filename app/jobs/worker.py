@@ -7,6 +7,7 @@ from typing import Any
 from app.jobs.artifacts import store_job_artifacts
 from app.jobs.models import EvidenceSummary, MobileResultCard, utc_now
 from app.jobs.runtime import JobRuntime
+from app.jobs.uploads import cleanup_upload_bundle, open_upload_bundle
 from app.models import AnalyzeRequest, AnalyzeResponse
 from app.trust.pipeline_v2.retrieval import RetrievalConfigurationError
 
@@ -176,6 +177,13 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
                 job.source.value,
                 [],
             )
+        elif job.source.type == "upload_bundle":
+            async with open_upload_bundle(job.source.value) as bundle:
+                result = await analyze_upload_bundle(
+                    bundle.title,
+                    bundle.text,
+                    bundle.files,
+                )
         else:
             result = await analyze_content(AnalyzeRequest(
                 url=job.source.value,
@@ -314,6 +322,10 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             status="failed", completed_at=utc_now(), elapsed_ms=elapsed(),
             error_code=type(exc).__name__, error_message=str(exc)[:500],
         )
+    finally:
+        current = await runtime.store.get(job_id)
+        if current and current.source.type == "upload_bundle":
+            cleanup_upload_bundle(current.source.value)
 
 
 async def run_job(ctx: dict[str, Any], job_id: str) -> None:
