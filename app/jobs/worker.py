@@ -72,6 +72,11 @@ def build_mobile_card(job_id: str, result: AnalyzeResponse, completed_at: dateti
         )
     verdict = str(verification.get("overall_verdict") or "待核实")
     headline_map = {
+        "主要说法有据": "公开证据支持主要说法",
+        "核心事实有据": "核心事实有据，部分细节需补充",
+        "部分说法不符": "部分说法与公开证据不符",
+        "存在误导表达": "事实表述存在误导性表达",
+        "关键说法不符": "关键说法与公开证据不符",
         "属实": "证据支持主要说法",
         "部分属实": "部分说法存在关键差异",
         "误导": "内容可能造成误导",
@@ -83,7 +88,7 @@ def build_mobile_card(job_id: str, result: AnalyzeResponse, completed_at: dateti
     return MobileResultCard(
         job_id=job_id,
         verdict=verdict,
-        headline=headline_map.get(verdict, f"核验结论：{verdict}"),
+        headline=headline_map.get(verdict, f"核验摘要：{verdict}"),
         conclusion=str(verification.get("conclusion") or "核验已完成，请查看逐项证据。"),
         evidence_count=int(verification.get("evidence_selected_count") or len(verification.get("source_ids") or [])),
         elapsed_ms=result.full_pipeline_milliseconds,

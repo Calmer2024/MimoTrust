@@ -135,12 +135,13 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
         assert field in entity
     for field in ("claimDetails", "sharingAdvice", "narrativeAnalysis", "evidenceGaps", "keyEvidence"):
         assert f"job.{field}" in ui
-    assert "version = 6" in database
+    assert "version = 7" in database
     assert "MIGRATION_1_2" in database
     assert "MIGRATION_2_3" in database
     assert "MIGRATION_3_4" in database
     assert "MIGRATION_4_5" in database
     assert "MIGRATION_5_6" in database
+    assert "MIGRATION_6_7" in database
     assert "extractedMetadata" in database
     for migration in (
         "MIGRATION_1_2",
@@ -148,6 +149,7 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
         "MIGRATION_3_4",
         "MIGRATION_4_5",
         "MIGRATION_5_6",
+        "MIGRATION_6_7",
     ):
         assert f"MimoDatabase.{migration}" in application
     for field in ("thinkingText", "reportDraft", "reportJson"):
@@ -155,7 +157,8 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
         assert field in database
     assert "模型思考过程" in ui
     assert "StructuredReport(job)" in ui
-    assert "综合判定" in ui
+    assert "核验摘要" in ui
+    assert "信息提示" in ui
     assert "证据充分度" in ui
     assert "逐项核验" in ui
     assert "ReportHero" in ui

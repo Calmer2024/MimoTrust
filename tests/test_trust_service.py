@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,16 +12,17 @@ import app.main as main_module
 import app.trust.service as service_module
 from app.models import StructuredInformation
 from app.trust.service import _client_result, verify_structured_information
-from app.trust.pipeline_v2.synthesis import validate_compact_report
+from app.trust.pipeline_v2.synthesis import build_report_request, validate_compact_report
 from app.trust.pipeline_v2.normalization import normalize_case_input
 from app.trust.pipeline_v2.evidence_triage import build_evidence_batches, build_triage_request
 from app.trust.pipeline_v2.planning import build_planning_request
+from app.trust.pipeline_v2.rendering import build_presentation_report, render_report_markdown
 
 
 def test_report_without_cited_evidence_cannot_publish_a_strong_verdict() -> None:
     report = validate_compact_report(
         {
-            "o": ["不实", "暂不建议传播", "模型记忆声称该说法错误。", []],
+            "o": ["不实", "存在关键争议", "模型记忆声称该说法错误。", []],
             "c": [["C1", "不实", "不足", [], "未找到支持材料。", ""]],
             "n": ["存在引导", ["夸大"], "该内容可能引导读者。"],
             "g": [],
@@ -33,13 +35,14 @@ def test_report_without_cited_evidence_cannot_publish_a_strong_verdict() -> None
     assert report["主张核验"][0]["结论"] == "证据不足"
     assert report["主张核验"][0]["证据充分度"] == "不足"
     assert report["叙事分析"]["判断"] == "证据不足"
+    assert report["整体判断"]["信息提示"] == "关键证据不足"
     assert report["待补证据"]
 
 
 def test_narrative_guidance_cannot_leave_a_report_fully_credible() -> None:
     report = validate_compact_report(
         {
-            "o": ["可信", "可正常传播", "基础研究真实。", ["E1"]],
+            "o": ["可信", "证据与语境较完整", "基础研究真实。", ["E1"]],
             "c": [["C1", "属实", "充分", [["E1", "S"]], "原文支持。", ""]],
             "n": ["存在引导", ["省略限定条件"], "省略条件会夸大实际影响。"],
             "g": [],
@@ -49,7 +52,73 @@ def test_narrative_guidance_cannot_leave_a_report_fully_credible() -> None:
     )
 
     assert report["整体判断"]["结论"] == "大体可信"
-    assert report["整体判断"]["传播建议"] == "补充语境后传播"
+    assert report["整体判断"]["信息提示"] == "存在语境缺失"
+
+
+def test_report_request_injects_the_current_date() -> None:
+    request = build_report_request(
+        {
+            "案例编号": "case-one",
+            "主题": "日期注入测试",
+            "主张": [{"编号": "C1", "文本": "测试主张", "表达": "直接"}],
+        },
+        {
+            "案例编号": "case-one",
+            "核验项": [
+                {"编号": "V1", "关联主张": ["C1"], "问题": "是否属实", "所需证据": "原始资料"}
+            ],
+            "查询": [
+                {"编号": "Q1", "关联核验项": ["V1"], "渠道": "网页", "文本": "测试查询"}
+            ],
+            "查询预算": 1,
+        },
+        {"案例编号": "case-one", "证据": []},
+        {"案例编号": "case-one", "证据判断": []},
+        current_date=date(2026, 8, 2),
+    )
+
+    assert '"当前日期":"2026-08-02"' in request["消息"][1]["content"]
+
+
+def test_rendering_uses_objective_labels_and_reads_legacy_advice() -> None:
+    report = build_presentation_report(
+        {
+            "案例编号": "case-one",
+            "主题": "兼容性测试",
+            "主张": [{"编号": "C1", "文本": "测试主张", "表达": "直接"}],
+        },
+        {
+            "案例编号": "case-one",
+            "证据": [{"证据编号": "E1", "标题": "来源", "链接": "https://example.com"}],
+        },
+        {
+            "案例编号": "case-one",
+            "整体判断": {
+                "结论": "可信",
+                "传播建议": "可正常传播",
+                "摘要": "存在直接支持材料。",
+                "关键证据": ["E1"],
+            },
+            "主张核验": [
+                {
+                    "主张编号": "C1",
+                    "结论": "属实",
+                    "证据充分度": "充分",
+                    "依据": [{"证据编号": "E1", "关系": "支持"}],
+                    "说明": "来源直接支持。",
+                    "不确定性": "",
+                }
+            ],
+            "叙事分析": {"判断": "未发现明显引导", "方式": [], "说明": "未见明显引导。"},
+            "待补证据": [],
+        },
+    )
+
+    assert report["整体判断"]["结论"] == "主要说法有据"
+    assert report["整体判断"]["信息提示"] == "证据与语境较完整"
+    markdown = render_report_markdown(report)
+    assert "## 核验摘要" in markdown
+    assert "**信息提示：** 证据与语境较完整" in markdown
 
 
 def test_source_context_reaches_planning_and_triage_requests(monkeypatch) -> None:
@@ -91,7 +160,7 @@ def test_client_result_projects_m7_audited_artifacts(tmp_path: Path) -> None:
             "整体判断": {
                 "结论": "可信",
                 "摘要": "核验完成",
-                "传播建议": "可正常传播",
+                "信息提示": "证据与语境较完整",
                 "关键证据": ["E1"],
             },
             "主张核验": [
@@ -145,7 +214,8 @@ def test_client_result_projects_m7_audited_artifacts(tmp_path: Path) -> None:
     )
 
     assert result["status"] == "completed"
-    assert result["overall_verdict"] == "可信"
+    assert result["overall_verdict"] == "主要说法有据"
+    assert result["sharing_advice"] == "证据与语境较完整"
     assert result["claim_checks"][0]["claim_id"] == "C1"
     assert result["evidence_used"][0]["id"] == "E1"
     assert result["search_plan"]["web_queries"] == ["测试查询"]

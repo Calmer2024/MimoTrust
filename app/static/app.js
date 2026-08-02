@@ -456,10 +456,10 @@ function renderVerification(verification, structured) {
   const verdictClass = verdictTone(verification.overall_verdict);
   $("trust-hero").innerHTML = `<div class="trust-verdict ${verdictClass}">
     <span class="verdict-mark"><i data-lucide="${verdictIcon(verification.overall_verdict)}" aria-hidden="true"></i></span>
-    <div class="trust-verdict-copy"><p class="trust-kicker">综合判定</p><h2>${escapeHtml(verification.overall_verdict || "证据不足")}</h2>
+    <div class="trust-verdict-copy"><p class="trust-kicker">核验摘要</p><h2>${escapeHtml(verification.overall_verdict || "证据不足")}</h2>
       ${report["主题"] ? `<p class="report-topic">${escapeHtml(report["主题"])}</p>` : ""}
       <p>${escapeHtml(verification.conclusion || "核验已完成。")}</p>
-      ${verification.sharing_advice ? `<p class="sharing-advice"><strong>传播建议</strong>${escapeHtml(verification.sharing_advice)}</p>` : ""}</div>
+      ${verification.sharing_advice ? `<p class="sharing-advice"><strong>信息提示</strong>${escapeHtml(verification.sharing_advice)}</p>` : ""}</div>
     <div class="trust-stats"><div><strong>${checks.length}</strong><span>项主张</span></div><div><strong>${Number(verification.evidence_reviewed_count || 0)}</strong><span>条已审阅</span></div><div><strong>${Number(verification.evidence_selected_count || 0)}</strong><span>条入选</span></div></div>
   </div>`;
 
@@ -556,16 +556,16 @@ function sourceLink(source, compact) {
 }
 
 function verdictTone(verdict) {
-  if (["可信", "大体可信", "属实", "大体属实"].includes(verdict)) return "verdict-positive";
-  if (["不实", "误导"].includes(verdict)) return "verdict-negative";
-  if (["真假混合", "部分属实"].includes(verdict)) return "verdict-mixed";
+  if (["主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实"].includes(verdict)) return "verdict-positive";
+  if (["关键说法不符", "存在误导表达", "不实", "误导"].includes(verdict)) return "verdict-negative";
+  if (["部分说法不符", "真假混合", "部分属实"].includes(verdict)) return "verdict-mixed";
   return "verdict-pending";
 }
 
 function verdictIcon(verdict) {
-  if (["可信", "大体可信", "属实", "大体属实"].includes(verdict)) return "badge-check";
-  if (["不实", "误导"].includes(verdict)) return "badge-x";
-  if (["真假混合", "部分属实"].includes(verdict)) return "circle-dot-dashed";
+  if (["主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实"].includes(verdict)) return "badge-check";
+  if (["关键说法不符", "存在误导表达", "不实", "误导"].includes(verdict)) return "badge-x";
+  if (["部分说法不符", "真假混合", "部分属实"].includes(verdict)) return "circle-dot-dashed";
   return "circle-help";
 }
 

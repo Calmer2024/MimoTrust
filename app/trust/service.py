@@ -21,6 +21,20 @@ ProgressCallback = Callable[[str], None | Awaitable[None]]
 _verification_lock = asyncio.Lock()
 _cases_root = Path("data") / "trust" / "cases"
 
+_OVERALL_DISPLAY_LABELS = {
+    "可信": "主要说法有据",
+    "大体可信": "核心事实有据",
+    "真假混合": "部分说法不符",
+    "误导": "存在误导表达",
+    "不实": "关键说法不符",
+}
+_LEGACY_INFORMATION_NOTICES = {
+    "可正常传播": "证据与语境较完整",
+    "补充语境后传播": "存在语境缺失",
+    "谨慎传播": "存在关键争议",
+    "暂不建议传播": "关键证据不足",
+}
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -133,10 +147,17 @@ def _client_result(
         "case_id": workspace.case_id,
         "run_id": workspace.run_id,
         "verification_mode": verification_mode,
-        "overall_verdict": overall.get("结论", "待核实"),
+        "overall_verdict": _OVERALL_DISPLAY_LABELS.get(
+            overall.get("结论"), overall.get("结论", "待核实")
+        ),
         "topic": report.get("主题", ""),
         "conclusion": overall.get("摘要", ""),
-        "sharing_advice": overall.get("传播建议", ""),
+        # Keep the transport key for existing clients; its content is now a
+        # descriptive information notice rather than behavioral advice.
+        "sharing_advice": overall.get("信息提示")
+        or _LEGACY_INFORMATION_NOTICES.get(
+            overall.get("传播建议"), overall.get("传播建议", "")
+        ),
         "claim_checks": checks,
         "narrative_analysis": {
             "verdict": narrative.get("判断", ""),

@@ -13,7 +13,14 @@ from .pipeline_metrics import build_pipeline_metrics
 from .workspace import CaseRunWorkspace
 
 
-RENDER_PROTOCOL_VERSION = "1"
+RENDER_PROTOCOL_VERSION = "2"
+_OVERALL_DISPLAY_LABELS = {
+    "可信": "主要说法有据",
+    "大体可信": "核心事实有据",
+    "真假混合": "部分说法不符",
+    "误导": "存在误导表达",
+    "不实": "关键说法不符",
+}
 
 
 class ReportRenderingError(ValueError):
@@ -126,13 +133,13 @@ def render_report_markdown(report: dict[str, Any]) -> str:
     lines = [
         f"# {_plain(report['主题'])}",
         "",
-        "## 核验结论",
+        "## 核验摘要",
         "",
         f"**{_plain(overall['结论'])}**",
         "",
         _plain(overall["摘要"]),
         "",
-        f"**传播建议：** {_plain(overall['传播建议'])}",
+        f"**信息提示：** {_plain(overall['信息提示'])}",
         "",
         "## 逐项核验",
     ]
@@ -337,9 +344,19 @@ def _overall(value: Any, evidence_ids: set[str]) -> dict[str, Any]:
         if evidence_id not in evidence_ids or evidence_id in normalized_ids:
             raise ReportRenderingError("整体判断.关键证据 包含无效或重复证据编号")
         normalized_ids.append(evidence_id)
+    information_notice = value.get("信息提示")
+    if information_notice is None:
+        information_notice = {
+            "可正常传播": "证据与语境较完整",
+            "补充语境后传播": "存在语境缺失",
+            "谨慎传播": "存在关键争议",
+            "暂不建议传播": "关键证据不足",
+        }.get(value.get("传播建议"), value.get("传播建议"))
     return {
-        "结论": _required_text(value.get("结论"), "整体判断.结论"),
-        "传播建议": _required_text(value.get("传播建议"), "整体判断.传播建议"),
+        "结论": _OVERALL_DISPLAY_LABELS.get(
+            value.get("结论"), _required_text(value.get("结论"), "整体判断.结论")
+        ),
+        "信息提示": _required_text(information_notice, "整体判断.信息提示"),
         "摘要": _required_text(value.get("摘要"), "整体判断.摘要"),
         "关键证据": normalized_ids,
     }

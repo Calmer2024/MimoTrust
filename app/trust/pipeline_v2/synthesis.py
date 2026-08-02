@@ -19,8 +19,8 @@ from .retrieval import RetrievalValidationError, validate_retrieval_plan
 from .workspace import CaseRunWorkspace
 
 
-SYNTHESIS_PROTOCOL_VERSION = "2"
-SYNTHESIS_PROMPT_VERSION = "m6-v2"
+SYNTHESIS_PROTOCOL_VERSION = "3"
+SYNTHESIS_PROMPT_VERSION = "m6-v3"
 DEFAULT_REPORT_MODEL = "mimo-v2.5-pro"
 DEFAULT_REPORT_THINKING = "enabled"
 DEFAULT_REPORT_TIMEOUT_SECONDS = 180.0
@@ -32,8 +32,8 @@ CLAIM_VERDICTS = frozenset(
 OVERALL_VERDICTS = frozenset(
     {"可信", "大体可信", "真假混合", "误导", "不实", "证据不足"}
 )
-SHARING_RECOMMENDATIONS = frozenset(
-    {"可正常传播", "补充语境后传播", "谨慎传播", "暂不建议传播"}
+INFORMATION_NOTICES = frozenset(
+    {"证据与语境较完整", "存在语境缺失", "存在关键争议", "关键证据不足"}
 )
 EVIDENCE_SUFFICIENCY = frozenset({"充分", "有限", "不足"})
 REPORT_RELATION_CODES = {"S": "支持", "R": "反驳", "B": "背景", "P": "传播"}
@@ -357,7 +357,7 @@ def _apply_evidence_safety(
         overall.update(
             {
                 "结论": "证据不足",
-                "传播建议": "暂不建议传播",
+                "信息提示": "关键证据不足",
                 "摘要": "当前未获得可引用的公开证据，无法确认或否定主要说法。",
                 "关键证据": [],
             }
@@ -375,8 +375,8 @@ def _apply_evidence_safety(
     if narrative["判断"] == "存在引导":
         if overall["结论"] == "可信":
             overall["结论"] = "大体可信"
-        if overall["传播建议"] == "可正常传播":
-            overall["传播建议"] = "补充语境后传播"
+        if overall["信息提示"] == "证据与语境较完整":
+            overall["信息提示"] = "存在语境缺失"
 
 
 async def run_m6_case(
@@ -614,16 +614,16 @@ def _validate_compact_overall(
 ) -> dict[str, Any]:
     if not isinstance(value, list) or len(value) != 4:
         raise SynthesisValidationError("o 必须包含4列")
-    verdict, recommendation, summary, key_ids = value
+    verdict, information_notice, summary, key_ids = value
     if verdict not in OVERALL_VERDICTS:
         raise SynthesisValidationError("o[1] 整体结论不合法")
-    if recommendation not in SHARING_RECOMMENDATIONS:
-        raise SynthesisValidationError("o[2] 传播建议不合法")
+    if information_notice not in INFORMATION_NOTICES:
+        raise SynthesisValidationError("o[2] 信息提示不合法")
     summary = _nonempty_text(summary, "o[3]")
     key_ids = _identifier_list(key_ids, evidence_ids, "o[4]")
     return {
         "结论": verdict,
-        "传播建议": recommendation,
+        "信息提示": information_notice,
         "摘要": summary,
         "关键证据": key_ids,
     }
@@ -823,7 +823,7 @@ def _report_system_prompt() -> str:
 
 判断原则：
 1. 事实结论只能依据输入证据。可用常识理解语言、逻辑和语义边界，但不得用模型记忆补充事实或虚构来源。
-2. 分开表达事实状态和传播建议。证据不足不等于已证明虚假，但快速粗筛可以因此建议谨慎或暂不传播。
+2. 分开表达事实状态和信息完整性。证据不足不等于已证明虚假。“信息提示”只描述证据和语境状态，不替用户决定是否相信、转发或采取行动；不得使用命令、劝告或行为指引语气。
 3. 区分“说法被报道或传播”和“说法内容属实”。多个转载相同内容不自动构成独立证据。
 4. 初筛账本七列依次为[E编号,来源性质,独立性,关系,全文F或摘要卡K,重复自,关键信息]。关系项是[C编号,S支持/R反驳/B背景/P传播,D直接/I间接]。这些标签只是建议，最终引用关系由你重新判断。
 5. K证据仍然存在，关键信息可用于理解覆盖和传播链；若仅有摘要卡而缺少可核对原始内容，不应据此形成强事实结论。F证据提供完整摘要。
@@ -834,15 +834,15 @@ def _report_system_prompt() -> str:
 10. 输出要短而完整：整体摘要不超过120字；每条说明不超过90字；不重复主张全文、证据标题、URL、来源画像或思考过程。
 
 只输出紧凑JSON，必须且只能包含o、c、n、g：
-o=[整体结论,传播建议,摘要,[关键E编号]]。
+o=[整体结论,信息提示,摘要,[关键E编号]]。
 c中的每行=[C编号,结论,证据充分度,[[E编号,关系编码]],说明,不确定性]。
 n=[叙事判断,[引导方式],说明]。
 g=[仍需补充的关键材料]。
 
 整体结论：可信、大体可信、真假混合、误导、不实、证据不足。
-传播建议：可正常传播、补充语境后传播、谨慎传播、暂不建议传播。
+信息提示：证据与语境较完整、存在语境缺失、存在关键争议、关键证据不足。
 逐项结论：属实、大体属实、部分属实、不实、误导、证据不足、不可核验。
 证据充分度：充分、有限、不足。关系编码：S支持、R反驳、B背景、P传播。
 叙事判断：存在引导、未发现明显引导、证据不足。
 
-示例：{"o":["真假混合","补充语境后传播","基础事实有依据，但附加指控混淆适用范围。",["E1","E4"]],"c":[["C1","属实","充分",[["E1","S"]],"原始记录直接支持核心事实。",""] ,["C2","误导","充分",[["E4","R"]],"规则只适用于更窄范围。",""]],"n":["存在引导",["混淆概念"],"输入用不适用的规则暗示基础事实造假。"],"g":[]}"""
+示例：{"o":["真假混合","存在语境缺失","基础事实有依据，但附加指控混淆适用范围。",["E1","E4"]],"c":[["C1","属实","充分",[["E1","S"]],"原始记录直接支持核心事实。",""] ,["C2","误导","充分",[["E4","R"]],"规则只适用于更窄范围。",""]],"n":["存在引导",["混淆概念"],"输入用不适用的规则暗示基础事实造假。"],"g":[]}"""

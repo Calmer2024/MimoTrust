@@ -1012,7 +1012,7 @@ private fun AssistantResultBubble(job: JobEntity) {
                 }
                 if (!active && !job.sharingAdvice.isNullOrBlank()) {
                     Text(
-                        "传播建议 · ${job.sharingAdvice}",
+                        "信息提示 · ${job.sharingAdvice}",
                         color = Cocoa,
                         fontSize = 12.sp,
                         lineHeight = 18.sp,
@@ -1144,7 +1144,7 @@ private fun ResultSummaryCard(job: JobEntity, active: Boolean, failed: Boolean, 
                 Text(summary, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
             }
             if (!active && !job.sharingAdvice.isNullOrBlank()) {
-                Text("传播建议 · ${job.sharingAdvice}", color = Cocoa, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("信息提示 · ${job.sharingAdvice}", color = Cocoa, fontSize = 12.sp, lineHeight = 18.sp)
             }
             if (active) {
                 LinearProgressIndicator(
@@ -2073,7 +2073,7 @@ private fun ReportHero(job: JobEntity, report: VerificationDetailsDto) {
             }
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text("综合判定", color = LightMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("核验摘要", color = LightMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(verdict, color = Ink, fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Black)
             }
         }
@@ -2083,7 +2083,7 @@ private fun ReportHero(job: JobEntity, report: VerificationDetailsDto) {
         Text(report.conclusion ?: job.conclusion.orEmpty(), color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
         report.sharingAdvice?.takeIf { it.isNotBlank() }?.let {
             Row(verticalAlignment = Alignment.Top) {
-                Text("传播建议", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("信息提示", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(9.dp))
                 Text(it, color = Muted, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
             }
@@ -2222,16 +2222,16 @@ private fun EvidenceLink(item: EvidenceDto, compact: Boolean) {
 }
 
 private fun verdictToneColor(verdict: String): Color = when (verdict) {
-    "可信", "大体可信", "属实", "大体属实" -> Color(0xFF3F6C52)
-    "不实", "虚假", "误导" -> Color(0xFF99534C)
-    "真假混合", "部分属实" -> Color(0xFF8A6A2D)
+    "主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实" -> Color(0xFF3F6C52)
+    "关键说法不符", "存在误导表达", "不实", "虚假", "误导" -> Color(0xFF99534C)
+    "部分说法不符", "真假混合", "部分属实" -> Color(0xFF8A6A2D)
     else -> Color(0xFF5F6670)
 }
 
 private fun verdictIcon(verdict: String): androidx.compose.ui.graphics.vector.ImageVector = when (verdict) {
-    "可信", "大体可信", "属实", "大体属实" -> Lucide.BadgeCheck
-    "不实", "虚假", "误导" -> Lucide.BadgeX
-    "真假混合", "部分属实" -> Lucide.CircleDotDashed
+    "主要说法有据", "核心事实有据", "可信", "大体可信", "属实", "大体属实" -> Lucide.BadgeCheck
+    "关键说法不符", "存在误导表达", "不实", "虚假", "误导" -> Lucide.BadgeX
+    "部分说法不符", "真假混合", "部分属实" -> Lucide.CircleDotDashed
     else -> Lucide.CircleHelp
 }
 
