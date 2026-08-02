@@ -381,16 +381,18 @@ def _extract_info(url: str) -> dict[str, Any]:
             return extract_xiaohongshu_info(url)
         except XiaohongshuParseError as exc:
             xiaohongshu_error = exc
+    douyin_browser_error: DouyinCookieError | None = None
     if (
         _is_douyin(url)
         and settings.douyin_auto_cookies
     ):
-        try:
-            return extract_douyin_browser_info(url)
-        except DouyinCookieError:
-            # Keep yt-dlp and the existing note parser as compatibility
-            # fallbacks when the browser cannot observe a public detail call.
-            pass
+        # A first navigation can establish the persistent session without
+        # exposing the detail response in time. Retry once before yt-dlp.
+        for _ in range(2):
+            try:
+                return extract_douyin_browser_info(url)
+            except DouyinCookieError as exc:
+                douyin_browser_error = exc
     options = {
         **_base_ydl_options(url),
         "skip_download": True,
@@ -408,8 +410,20 @@ def _extract_info(url: str) -> dict[str, Any]:
                 with yt_dlp.YoutubeDL(retry_options) as downloader:
                     info = downloader.extract_info(url, download=False)
             except Exception as retry_error:
+                if douyin_browser_error is not None:
+                    raise PipelineError(
+                        "抖音作品解析失败：浏览器适配器未获取到作品数据"
+                        f"（{douyin_browser_error}）；yt-dlp 会话也不可用"
+                        f"（{retry_error}）"
+                    ) from retry_error
                 raise _douyin_failure(retry_error) from retry_error
         elif _is_douyin(url):
+            if douyin_browser_error is not None:
+                raise PipelineError(
+                    "抖音作品解析失败：浏览器适配器未获取到作品数据"
+                    f"（{douyin_browser_error}）；yt-dlp 也解析失败"
+                    f"（{first_error}）"
+                ) from first_error
             raise _douyin_failure(first_error) from first_error
         elif is_xiaohongshu_url(url):
             raise PipelineError(

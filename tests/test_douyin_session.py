@@ -82,6 +82,41 @@ def test_extract_info_refreshes_douyin_session_once(monkeypatch) -> None:
     assert forces == [False, True]
 
 
+def test_extract_info_retries_transient_douyin_browser_failure(monkeypatch) -> None:
+    browser_calls = 0
+
+    def flaky_browser(url: str):
+        nonlocal browser_calls
+        browser_calls += 1
+        if browser_calls == 1:
+            raise DouyinCookieError("作品接口首次未出现")
+        return {
+            "id": "456",
+            "title": "browser recovered",
+            "extractor": "DouyinBrowser",
+        }
+
+    class UnexpectedYoutubeDL:
+        def __init__(self, _options):
+            raise AssertionError("yt-dlp must not run after the browser retry succeeds")
+
+    monkeypatch.setattr(pipeline, "extract_douyin_browser_info", flaky_browser)
+    monkeypatch.setattr(pipeline.yt_dlp, "YoutubeDL", UnexpectedYoutubeDL)
+    monkeypatch.setattr(
+        pipeline,
+        "settings",
+        SimpleNamespace(
+            douyin_auto_cookies=True,
+            ytdlp_cookies_file="",
+        ),
+    )
+
+    result = pipeline._extract_info("https://www.douyin.com/video/456")
+
+    assert result["id"] == "456"
+    assert browser_calls == 2
+
+
 def test_external_cookie_file_uses_paired_user_agent(monkeypatch, tmp_path: Path) -> None:
     cookie_file = tmp_path / "cookies.txt"
     cookie_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
