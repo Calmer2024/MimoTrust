@@ -65,6 +65,17 @@ def test_mobile_card_uses_neutral_user_copy() -> None:
     assert card.elapsed_ms == 12_300
 
 
+def test_android_routes_plain_text_to_agent_context() -> None:
+    repository = Path(
+        "android/app/src/main/java/com/mimotrust/xiaozhen/data/JobRepository.kt"
+    ).read_text(encoding="utf-8")
+    worker = Path("app/jobs/worker.py").read_text(encoding="utf-8")
+
+    assert '"shared_url" else "agent_context"' in repository
+    assert 'job.source.type == "agent_context"' in worker
+    assert "analyze_upload_bundle" in worker
+
+
 def test_sql_job_store_persists_status(tmp_path: Path) -> None:
     async def scenario() -> None:
         store = SqlJobStore(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")

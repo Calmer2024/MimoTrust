@@ -40,6 +40,10 @@ data class MobileCardDto(
     val conclusion: String,
     @SerializedName("evidence_count") val evidenceCount: Int,
     @SerializedName("elapsed_ms") val elapsedMs: Long,
+    @SerializedName("key_evidence") val keyEvidence: List<EvidenceDto>? = null,
+    @SerializedName("uncertainty_note") val uncertaintyNote: String? = null,
+    @SerializedName("report_url") val reportUrl: String? = null,
+    @SerializedName("ai_disclaimer") val aiDisclaimer: String? = null,
 )
 
 data class ClaimCheckDto(
@@ -57,15 +61,22 @@ data class NarrativeAnalysisDto(
 )
 
 data class EvidenceDto(
+    val id: String? = null,
     val title: String? = null,
     val url: String? = null,
+    @SerializedName("source_name") val sourceName: String? = null,
+    @SerializedName("published_date") val publishedDate: String? = null,
+    val author: String? = null,
+    val relation: String? = null,
 )
 
 data class VerificationDetailsDto(
+    @SerializedName("sharing_advice") val sharingAdvice: String? = null,
     @SerializedName("claim_checks") val claimChecks: List<ClaimCheckDto>? = null,
     @SerializedName("narrative_analysis") val narrativeAnalysis: NarrativeAnalysisDto? = null,
     @SerializedName("evidence_gaps") val evidenceGaps: List<String>? = null,
     @SerializedName("evidence_used") val evidenceUsed: List<EvidenceDto>? = null,
+    @SerializedName("report_markdown") val reportMarkdown: String? = null,
 )
 
 data class AnalysisDto(val verification: VerificationDetailsDto? = null)

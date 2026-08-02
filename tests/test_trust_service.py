@@ -11,6 +11,26 @@ import app.main as main_module
 import app.trust.service as service_module
 from app.models import StructuredInformation
 from app.trust.service import _client_result, verify_structured_information
+from app.trust.pipeline_v2.synthesis import validate_compact_report
+
+
+def test_report_without_cited_evidence_cannot_publish_a_strong_verdict() -> None:
+    report = validate_compact_report(
+        {
+            "o": ["不实", "暂不建议传播", "模型记忆声称该说法错误。", []],
+            "c": [["C1", "不实", "不足", [], "未找到支持材料。", ""]],
+            "n": ["存在引导", ["夸大"], "该内容可能引导读者。"],
+            "g": [],
+        },
+        {"案例编号": "case-one", "主张": [{"编号": "C1"}]},
+        {"证据": []},
+    )
+
+    assert report["整体判断"]["结论"] == "证据不足"
+    assert report["主张核验"][0]["结论"] == "证据不足"
+    assert report["主张核验"][0]["证据充分度"] == "不足"
+    assert report["叙事分析"]["判断"] == "证据不足"
+    assert report["待补证据"]
 
 
 def _write_json(path: Path, value: object) -> None:

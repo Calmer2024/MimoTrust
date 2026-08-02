@@ -86,16 +86,24 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             job_id, "content_resolving", "running", "正在读取分享内容", 8,
             status="running", started_at=utc_now(), elapsed_ms=elapsed(),
         )
+        from app.content import analyze_upload_bundle
         from app.main import analyze_content
 
         await runtime.emit(job_id, "media_extracting", "running", "正在理解视频、字幕与画面", 22, elapsed_ms=elapsed())
-        result = await analyze_content(AnalyzeRequest(
-            url=job.source.value,
-            input_kind="auto",
-            mode=job.mode,
-            refresh=False,
-            verify=False,
-        ))
+        if job.source.type == "agent_context":
+            result = await analyze_upload_bundle(
+                "分享文字核验",
+                job.source.value,
+                [],
+            )
+        else:
+            result = await analyze_content(AnalyzeRequest(
+                url=job.source.value,
+                input_kind="auto",
+                mode=job.mode,
+                refresh=False,
+                verify=False,
+            ))
         await ensure_not_cancelled()
         await runtime.emit(
             job_id, "claim_structuring", "running",

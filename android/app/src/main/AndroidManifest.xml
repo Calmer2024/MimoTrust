@@ -14,9 +14,9 @@
     <application
         android:name=".MimoTrustApplication"
         android:allowBackup="true"
-        android:icon="@drawable/xiaozhen_logo"
+        android:icon="@drawable/xiaozhen_app_icon"
         android:label="小真核验"
-        android:roundIcon="@drawable/xiaozhen_logo"
+        android:roundIcon="@drawable/xiaozhen_app_icon"
         android:supportsRtl="true"
         android:theme="@style/Theme.MimoTrust"
         android:usesCleartextTraffic="true">

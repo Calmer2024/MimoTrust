@@ -206,6 +206,7 @@ def validate_compact_report(
         raise SynthesisValidationError("整体关键证据必须出现在逐主张依据中")
     narrative = _validate_compact_narrative(raw_report["n"])
     gaps = _string_list(raw_report["g"], "g", allow_empty=True)
+    _apply_evidence_safety(overall, claim_checks, narrative, gaps)
     return {
         "版本": SYNTHESIS_PROTOCOL_VERSION,
         "案例编号": claims["案例编号"],
@@ -215,6 +216,49 @@ def validate_compact_report(
         "待补证据": gaps,
         "证据账本文件": "05_evidence_ledger.json",
     }
+
+
+def _apply_evidence_safety(
+    overall: dict[str, Any],
+    claim_checks: list[dict[str, Any]],
+    narrative: dict[str, Any],
+    gaps: list[str],
+) -> None:
+    """Prevent model memory from becoming a strong verdict without cited evidence."""
+
+    cited_count = 0
+    for check in claim_checks:
+        basis = check["依据"]
+        cited_count += len(basis)
+        if basis or check["结论"] in {"证据不足", "不可核验"}:
+            continue
+        check.update(
+            {
+                "结论": "证据不足",
+                "证据充分度": "不足",
+                "说明": "当前没有可引用的公开证据，无法对该主张作出强事实判断。",
+                "不确定性": check["不确定性"] or "需要补充可核对的一手或独立来源。",
+            }
+        )
+
+    if cited_count == 0 and overall["结论"] != "证据不足":
+        overall.update(
+            {
+                "结论": "证据不足",
+                "传播建议": "暂不建议传播",
+                "摘要": "当前未获得可引用的公开证据，无法确认或否定主要说法。",
+                "关键证据": [],
+            }
+        )
+        narrative.update(
+            {
+                "判断": "证据不足",
+                "方式": [],
+                "说明": "缺少可核对证据，暂不对内容的叙事倾向作强判断。",
+            }
+        )
+        if not gaps:
+            gaps.append("需要补充可核对的一手材料或相互独立的可靠来源。")
 
 
 async def run_m6_case(

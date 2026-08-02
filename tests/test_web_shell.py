@@ -110,12 +110,27 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
     application = (root / "MimoTrustApplication.kt").read_text(encoding="utf-8")
     ui = (root / "ui/MimoTrustApp.kt").read_text(encoding="utf-8")
 
-    for field in ("claimChecks", "narrativeAnalysis", "evidenceGaps", "evidenceUsed"):
+    for field in (
+        "sharingAdvice",
+        "claimChecks",
+        "narrativeAnalysis",
+        "evidenceGaps",
+        "evidenceUsed",
+        "reportMarkdown",
+    ):
         assert field in dto
-    for field in ("claimDetails", "narrativeAnalysis", "evidenceGaps", "keyEvidence"):
+    for field in (
+        "claimDetails",
+        "sharingAdvice",
+        "narrativeAnalysis",
+        "evidenceGaps",
+        "uncertaintyNote",
+        "keyEvidence",
+    ):
         assert field in repository
         assert field in entity
         assert f"job.{field}" in ui
-    assert "version = 2" in database
+    assert "version = 3" in database
     assert "MIGRATION_1_2" in database
-    assert ".addMigrations(MimoDatabase.MIGRATION_1_2)" in application
+    assert "MIGRATION_2_3" in database
+    assert "MimoDatabase.MIGRATION_1_2, MimoDatabase.MIGRATION_2_3" in application

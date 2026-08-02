@@ -44,7 +44,11 @@ class JobRepository(
         val response = api.createJob(
             deviceId,
             CreateJobRequestDto(
-                source = JobSourceDto(value = text, platformHint = platformHint(text)),
+                source = JobSourceDto(
+                    type = if (containsHttpUrl(text)) "shared_url" else "agent_context",
+                    value = text,
+                    platformHint = platformHint(text),
+                ),
                 verificationMode = verificationMode,
                 clientRequestId = clientRequestId,
             ),
@@ -143,6 +147,10 @@ class JobRepository(
             conclusion = result.conclusion,
             evidenceCount = result.evidenceCount,
             elapsedMs = result.elapsedMs,
+            sharingAdvice = details?.sharingAdvice?.trim()?.takeIf { it.isNotEmpty() },
+            uncertaintyNote = result.uncertaintyNote?.trim()?.takeIf { it.isNotEmpty() },
+            reportUrl = result.reportUrl,
+            aiDisclaimer = result.aiDisclaimer,
             claimDetails = details?.claimChecks
                 ?.mapNotNull { item ->
                     val claim = item.claim?.trim().orEmpty()
@@ -171,8 +179,13 @@ class JobRepository(
             keyEvidence = details?.evidenceUsed
                 ?.mapNotNull { evidence ->
                     evidence.title?.trim()?.takeIf { it.isNotEmpty() }?.let { title ->
+                        val prefix = listOfNotNull(
+                            evidence.id?.trim()?.takeIf { it.isNotEmpty() },
+                            evidence.sourceName?.trim()?.takeIf { it.isNotEmpty() },
+                        ).joinToString(" · ")
+                        val label = if (prefix.isEmpty()) title else "$prefix · $title"
                         evidence.url?.trim()?.takeIf { it.isNotEmpty() }
-                            ?.let { "$title\n$it" } ?: title
+                            ?.let { "$label\n$it" } ?: label
                     }
                 }
                 ?.joinToString("\n\n")
@@ -189,4 +202,7 @@ class JobRepository(
         "bilibili.com" in text || "b23.tv" in text -> "bilibili"
         else -> null
     }
+
+    private fun containsHttpUrl(text: String): Boolean =
+        Regex("https?://\\S+", RegexOption.IGNORE_CASE).containsMatchIn(text)
 }
