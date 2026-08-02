@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -77,6 +79,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -85,6 +88,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mimotrust.xiaozhen.R
@@ -104,6 +108,7 @@ import kotlin.math.sin
 import kotlin.math.roundToInt
 
 private enum class MainTab { Chat, History, Settings }
+private val BottomBarHeight = 68.dp
 
 private val AppIconContinuousCorner = GenericShape { size, _ ->
     val width = size.width
@@ -130,6 +135,9 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
         val historyListState = rememberLazyListState()
         val settingsListState = rememberLazyListState()
         val selected = jobs.firstOrNull { it.jobId == selectedId }
+        val density = LocalDensity.current
+        val imeBottom = with(density) { WindowInsets.ime.getBottom(this).toDp() }
+        val composerBottomInset = maxOf(0.dp, BottomBarHeight - imeBottom)
 
         if (selected != null) {
             JobDetail(selected) { selectedId = null }
@@ -146,7 +154,8 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
                     onVerify = viewModel::verify,
                     onOpen = { selectedId = it.jobId },
                     listState = chatListState,
-                    modifier = Modifier.padding(scaffoldPadding),
+                    composerBottomInset = composerBottomInset,
+                    modifier = Modifier.padding(top = scaffoldPadding.calculateTopPadding()),
                 )
                 MainTab.History -> HistoryScreen(
                     jobs = jobs,
@@ -169,6 +178,7 @@ private fun ChatScreen(
     onVerify: (String, String) -> Unit,
     onOpen: (JobEntity) -> Unit,
     listState: LazyListState,
+    composerBottomInset: Dp,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
@@ -214,7 +224,7 @@ private fun ChatScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 22.dp, top = 82.dp, end = 22.dp, bottom = 90.dp),
+            contentPadding = PaddingValues(start = 22.dp, top = 82.dp, end = 22.dp, bottom = 132.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             item { WelcomeHeroCard() }
@@ -235,7 +245,7 @@ private fun ChatScreen(
         )
 
         Box(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().zIndex(2f),
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = composerBottomInset).zIndex(2f),
             contentAlignment = Alignment.BottomCenter,
         ) {
             ChatComposer(
@@ -283,18 +293,20 @@ private fun BrandHeader(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text("小真", fontSize = 16.sp, color = Ink)
-            Box(
-                Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.TopCenter,
-            ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Row(
-                    Modifier.clip(RoundedCornerShape(12.dp)).clickable { modeMenuExpanded = true }
-                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                    Modifier.height(22.dp).clip(RoundedCornerShape(11.dp)).clickable { modeMenuExpanded = true }
+                        .padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(if (verificationMode == "quality") "高质量思考" else "快速思考", fontSize = 11.sp, color = LightMuted)
-                    Spacer(Modifier.width(2.dp))
-                    Icon(Lucide.ChevronDown, null, tint = LightMuted, modifier = Modifier.size(12.dp))
+                    Text(
+                        if (verificationMode == "quality") "高质量思考" else "快速思考",
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        color = LightMuted,
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Icon(Lucide.ChevronDown, null, tint = LightMuted, modifier = Modifier.size(13.dp))
                 }
                 DropdownMenu(
                     expanded = modeMenuExpanded,
@@ -350,17 +362,18 @@ private fun ModeMenuItem(
 ) {
     DropdownMenuItem(
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(title, color = Ink, fontSize = 14.sp)
-                Text(subtitle, color = LightMuted, fontSize = 11.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(subtitle, color = LightMuted, fontSize = 11.sp, lineHeight = 15.sp)
             }
         },
         onClick = onClick,
-        leadingIcon = {
-            if (selected) Icon(Lucide.Check, null, tint = Cocoa, modifier = Modifier.size(18.dp))
+        leadingIcon = { Icon(icon, null, tint = Cocoa, modifier = Modifier.size(19.dp)) },
+        trailingIcon = {
+            if (selected) Icon(Lucide.Check, null, tint = Green, modifier = Modifier.size(18.dp))
             else Spacer(Modifier.size(18.dp))
         },
-        trailingIcon = { Icon(icon, null, tint = Cocoa, modifier = Modifier.size(19.dp)) },
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
     )
 }
 
@@ -546,55 +559,8 @@ private fun AssistantResultBubble(job: JobEntity) {
         }
 
         SourceDetailsCard(job)
-
-        Box(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-                .background(if (active) Soft else OrangeSoft).padding(14.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                Text(
-                    when {
-                        active -> processLabel(job.progress)
-                        failed -> "暂时无法得出结果"
-                        else -> job.verdict ?: "核实完成"
-                    },
-                    color = if (active) Cocoa else Orange,
-                    fontSize = 13.sp,
-                )
-                Text(
-                    job.headline ?: job.sourceText,
-                    color = Ink,
-                    fontSize = 17.sp,
-                    lineHeight = 23.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val summary = if (active) job.displayText else job.conclusion
-                if (!summary.isNullOrBlank()) {
-                    Text(summary, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                }
-                if (!active && !job.sharingAdvice.isNullOrBlank()) {
-                    Text(
-                        "传播建议 · ${job.sharingAdvice}",
-                        color = Cocoa,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                    )
-                }
-                if (active) {
-                    LinearProgressIndicator(
-                        progress = { continuousProgress },
-                        modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(4.dp).clip(CircleShape),
-                        color = Orange,
-                        trackColor = Divider,
-                    )
-                    Text("${(continuousProgress * 100).roundToInt()}%", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
-                }
-            }
-        }
-
-        Text("处理过程", color = Muted, fontSize = 12.sp)
-        InlineProcess(job.jobId, job.progress, active)
+        ResultSummaryCard(job, active, failed, continuousProgress)
+        ProcessSectionCard(job.jobId, job.progress, active)
 
         if (!active && !failed) {
             HorizontalDivider(color = Divider)
@@ -623,25 +589,25 @@ private fun SourceDetailsCard(job: JobEntity, compact: Boolean = false) {
     val sectionRadius = if (compact) 15.dp else 18.dp
 
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(sectionRadius)).background(SurfaceSoft)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(sectionRadius)).background(BlueSoft)
             .padding(horizontal = 14.dp, vertical = if (compact) 11.dp else 13.dp),
         verticalArrangement = Arrangement.spacedBy(if (compact) 9.dp else 11.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(iconSize).clip(RoundedCornerShape(11.dp)).background(OrangeSoft),
+                Modifier.size(iconSize).clip(RoundedCornerShape(11.dp)).background(Color.White),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     if (source.isVideo) Lucide.Video else Lucide.Link,
                     contentDescription = null,
-                    tint = Orange,
+                    tint = Blue,
                     modifier = Modifier.size(18.dp),
                 )
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("信源详情", color = Ink, fontSize = 12.sp, lineHeight = 16.sp)
+                Text("信源详情", color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
                 Text(
                     platform,
                     color = Muted,
@@ -660,19 +626,21 @@ private fun SourceDetailsCard(job: JobEntity, compact: Boolean = false) {
             lineHeight = if (compact) 18.sp else 20.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = iconSize + 10.dp),
         )
 
         topic?.let {
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(OrangeSoft)
+                Modifier.fillMaxWidth().padding(start = iconSize + 10.dp).clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = .78f))
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Lucide.Hash, contentDescription = null, tint = Orange, modifier = Modifier.size(15.dp))
+                Icon(Lucide.Hash, contentDescription = null, tint = Blue, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
                     it,
-                    color = Cocoa,
+                    color = Ink,
                     fontSize = 11.sp,
                     lineHeight = 17.sp,
                     maxLines = if (compact) 1 else 3,
@@ -684,7 +652,100 @@ private fun SourceDetailsCard(job: JobEntity, compact: Boolean = false) {
 }
 
 @Composable
-private fun InlineProcess(jobId: String, progress: Int, isRunning: Boolean) {
+private fun ResultSummaryCard(job: JobEntity, active: Boolean, failed: Boolean, progress: Float) {
+    val tint = if (active) Amber else Orange
+    val background = if (active) AmberSoft else OrangeSoft
+    val status = when {
+        active -> processLabel(job.progress)
+        failed -> "暂时无法得出结果"
+        else -> job.verdict ?: "核实完成"
+    }
+    val icon = when {
+        active -> Lucide.Search
+        failed -> Lucide.CircleAlert
+        else -> Lucide.CircleCheck
+    }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(background).padding(14.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        ResultSectionIcon(icon, tint)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(status, color = tint, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(
+                job.headline ?: job.sourceText,
+                color = Ink,
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val summary = if (active) job.displayText else job.conclusion
+            if (!summary.isNullOrBlank()) {
+                Text(summary, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+            }
+            if (!active && !job.sharingAdvice.isNullOrBlank()) {
+                Text("传播建议 · ${job.sharingAdvice}", color = Cocoa, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+            if (active) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(4.dp).clip(CircleShape),
+                    color = Amber,
+                    trackColor = Divider,
+                )
+                Text("${(progress * 100).roundToInt()}%", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProcessSectionCard(jobId: String, progress: Int, active: Boolean) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(GreenSoft).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ResultSectionHeader(
+            icon = Lucide.ListChecks,
+            title = "处理过程",
+            subtitle = if (active) processLabel(progress) else "核验流程记录",
+            tint = Green,
+        )
+        InlineProcess(jobId, progress, active, Modifier.padding(start = 24.dp))
+    }
+}
+
+@Composable
+private fun ResultSectionHeader(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        ResultSectionIcon(icon, tint)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+            Text(subtitle, color = Muted, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun ResultSectionIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: Color) {
+    Box(
+        Modifier.size(36.dp).clip(RoundedCornerShape(11.dp)).background(Color.White.copy(alpha = .78f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+    }
+}
+
+@Composable
+private fun InlineProcess(jobId: String, progress: Int, isRunning: Boolean, modifier: Modifier = Modifier) {
     val stages = listOf(
         "读取内容" to 8,
         "理解文字与画面" to 22,
@@ -710,7 +771,7 @@ private fun InlineProcess(jobId: String, progress: Int, isRunning: Boolean) {
         }
     }
 
-    Column {
+    Column(modifier) {
         stages.forEachIndexed { index, (label, threshold) ->
             val current = isRunning && index == targetCount - 1
             val completed = index < targetCount && !current
@@ -1009,7 +1070,7 @@ private fun BottomNavigation(selected: MainTab, onSelect: (MainTab) -> Unit) {
     Column(Modifier.fillMaxWidth().background(Paper)) {
         if (selected != MainTab.Chat) HorizontalDivider(color = Divider, thickness = 0.5.dp)
         Row(
-            Modifier.fillMaxWidth().height(74.dp).padding(horizontal = 42.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().height(BottomBarHeight).padding(horizontal = 42.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1029,7 +1090,7 @@ private fun NavigationItem(
 ) {
     val active = tab == selected
     Column(
-        Modifier.width(72.dp).clip(RoundedCornerShape(16.dp)).clickable { onSelect(tab) }.padding(vertical = 6.dp),
+        Modifier.width(72.dp).clip(RoundedCornerShape(14.dp)).clickable { onSelect(tab) }.padding(vertical = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         when (tab) {
@@ -1037,19 +1098,19 @@ private fun NavigationItem(
             MainTab.History -> HistoryTabIcon(active, label)
             MainTab.Settings -> SettingsTabIcon(active, label)
         }
-        Spacer(Modifier.height(3.dp))
-        Text(label, color = if (active) Cocoa else LightMuted, fontSize = 11.sp)
+        Spacer(Modifier.height(1.dp))
+        Text(label, color = if (active) Cocoa else LightMuted, fontSize = 9.sp, lineHeight = 12.sp)
     }
 }
 
 @Composable
 private fun ChatTabIcon(active: Boolean, contentDescription: String) {
     Box(
-        Modifier.size(30.dp).semantics { this.contentDescription = contentDescription },
+        Modifier.size(28.dp).semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.size(30.dp)) {
-            scale(0.75f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+        Canvas(Modifier.size(28.dp)) {
+            scale(0.70f, pivot = Offset(size.width / 2f, size.height / 2f)) {
             val bubblePath = Path().apply {
                 moveTo(15.dp.toPx(), 2.dp.toPx())
                 cubicTo(22.dp.toPx(), 2.dp.toPx(), 27.dp.toPx(), 6.8.dp.toPx(), 27.dp.toPx(), 13.dp.toPx())
@@ -1082,9 +1143,9 @@ private fun ChatTabIcon(active: Boolean, contentDescription: String) {
 @Composable
 private fun HistoryTabIcon(active: Boolean, contentDescription: String) {
     Canvas(
-        Modifier.size(30.dp).semantics { this.contentDescription = contentDescription },
+        Modifier.size(28.dp).semantics { this.contentDescription = contentDescription },
     ) {
-        scale(0.75f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+        scale(0.70f, pivot = Offset(size.width / 2f, size.height / 2f)) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val bodyColor = if (active) Cocoa else LightMuted
         if (active) drawCircle(color = bodyColor, radius = 11.5.dp.toPx(), center = center, style = Fill)
@@ -1117,9 +1178,9 @@ private fun HistoryTabIcon(active: Boolean, contentDescription: String) {
 @Composable
 private fun SettingsTabIcon(active: Boolean, contentDescription: String) {
     Canvas(
-        Modifier.size(30.dp).semantics { this.contentDescription = contentDescription },
+        Modifier.size(28.dp).semantics { this.contentDescription = contentDescription },
     ) {
-        scale(0.75f, pivot = Offset(size.width / 2f, size.height / 2f)) {
+        scale(0.70f, pivot = Offset(size.width / 2f, size.height / 2f)) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val outerRadius = 12.5.dp.toPx()
         val rootRadius = 9.4.dp.toPx()

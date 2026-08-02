@@ -20,9 +20,12 @@ val Orange = Color(0xFFFF684B)
 val OrangeSoft = Color(0xFFFFEEE8)
 val Cocoa = Color(0xFF46352B)
 val Blue = Color(0xFF5684EB)
+val BlueSoft = Color(0xFFEEF4FF)
 val Cyan = Color(0xFF26B7D5)
 val Green = Color(0xFF13C878)
+val GreenSoft = Color(0xFFEDF9F3)
 val Amber = Color(0xFFFFB44B)
+val AmberSoft = Color(0xFFFFF7E7)
 
 private val MimoColors = lightColorScheme(
     primary = Ink,
