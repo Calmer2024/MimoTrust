@@ -302,6 +302,39 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   color: var(--ink-tertiary);
   font: 10px/1 var(--font-mono);
 }
+.generation-stream { display: grid; gap: 8px; margin-top: 12px; }
+.stream-block {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+.stream-block summary {
+  padding: 10px 12px;
+  color: var(--ink-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.stream-block pre {
+  max-height: 240px;
+  margin: 0;
+  padding: 0 12px 12px;
+  overflow: auto;
+  color: var(--ink-secondary);
+  font: 11px/1.7 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.stream-thinking { box-shadow: inset 2px 0 0 #8a817a; }
+.stream-report { box-shadow: inset 2px 0 0 #5f8068; }
+.stream-artifact { box-shadow: inset 2px 0 0 #8b735f; }
+.artifact-body { display: grid; gap: 6px; padding: 0 12px 12px; }
+.artifact-body > p { margin: 0 0 3px; color: var(--ink-tertiary); font-size: 10px; }
+.artifact-row { display: grid; gap: 3px; padding: 7px 8px; border-radius: 6px; color: inherit; text-decoration: none; background: var(--surface); }
+.artifact-row span { color: var(--ink-tertiary); font: 9px/1.2 var(--font-mono); }
+.artifact-row strong { color: var(--ink-secondary); font-size: 11px; line-height: 1.5; }
+a.artifact-row:hover strong { color: var(--ink); text-decoration: underline; }
 .skeleton {
   height: 12px;
   margin: 15px 0;

@@ -126,6 +126,9 @@ async function readEventStream(response, onProgress, failureMessage) {
       if (!dataText) continue;
       const event = JSON.parse(dataText);
       if (event.type === "progress") onProgress(event.message);
+      if (event.type === "thinking_delta") appendModelStream("thinking", event.text || "");
+      if (event.type === "report_delta") appendModelStream("report", event.text || "");
+      if (event.type === "artifact") appendArtifact(event.data || {});
       if (event.type === "error") throw new Error(event.message || "全流程执行失败");
       if (event.type === "result") result = event.data;
     }
@@ -138,6 +141,57 @@ async function readEventStream(response, onProgress, failureMessage) {
 function resetPipelineProgress(started) {
   progressStarted = started;
   $("pipeline-progress").innerHTML = "";
+  $("generation-stream").innerHTML = "";
+}
+
+function appendModelStream(kind, text) {
+  if (!text) return;
+  const id = `stream-${kind}`;
+  let details = $(id);
+  if (!details) {
+    details = document.createElement("details");
+    details.id = id;
+    details.className = `stream-block stream-${kind}`;
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = kind === "thinking" ? "模型思考过程" : "实时报告草稿";
+    const content = document.createElement("pre");
+    details.append(summary, content);
+    $("generation-stream").append(details);
+  }
+  details.querySelector("pre").textContent += text;
+}
+
+function appendArtifact(artifact) {
+  const details = document.createElement("details");
+  details.className = "stream-block stream-artifact";
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = artifact.title || "阶段结果";
+  const body = document.createElement("div");
+  body.className = "artifact-body";
+  if (artifact.summary) {
+    const description = document.createElement("p");
+    description.textContent = artifact.summary;
+    body.append(description);
+  }
+  (artifact.items || []).forEach(item => {
+    const row = item.url ? document.createElement("a") : document.createElement("div");
+    row.className = "artifact-row";
+    if (item.url) {
+      row.href = item.url;
+      row.target = "_blank";
+      row.rel = "noopener noreferrer";
+    }
+    const meta = document.createElement("span");
+    meta.textContent = [item.label, item.meta].filter(Boolean).join(" · ");
+    const text = document.createElement("strong");
+    text.textContent = item.text || "";
+    row.append(meta, text);
+    body.append(row);
+  });
+  details.append(summary, body);
+  $("generation-stream").append(details);
 }
 
 function appendPipelineProgress(message) {

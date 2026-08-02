@@ -117,6 +117,20 @@ class JobRepository(
                             extractedMetadata = event.contentMetadata
                                 ?.let(::formatContentMetadata)
                                 ?: old.extractedMetadata,
+                            thinkingText = when (event.eventKind) {
+                                "thinking_delta" -> appendDelta(old.thinkingText, event.payload?.text)
+                                "stream_reset" -> null
+                                else -> old.thinkingText
+                            },
+                            reportDraft = when (event.eventKind) {
+                                "report_delta" -> appendDelta(old.reportDraft, event.payload?.text)
+                                "stream_reset" -> null
+                                else -> old.reportDraft
+                            },
+                            processArtifacts = when (event.eventKind) {
+                                "artifact" -> appendArtifact(old.processArtifacts, event.payload)
+                                else -> old.processArtifacts
+                            },
                         )
                         dao.upsert(updated)
                         notifier.showProgress(updated)
@@ -165,6 +179,7 @@ class JobRepository(
                     transcriptChars = analysis.transcriptChars,
                 )
             } ?: old.extractedMetadata,
+            reportJson = details?.let { gson.toJson(it) },
             claimDetails = details?.claimChecks
                 ?.mapNotNull { item ->
                     val claim = item.claim?.trim().orEmpty()
@@ -251,5 +266,16 @@ class JobRepository(
             }
         }
         return lines.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }
+
+    private fun appendDelta(existing: String?, delta: String?): String? {
+        if (delta.isNullOrEmpty()) return existing
+        return ((existing ?: "") + delta).takeLast(200_000)
+    }
+
+    private fun appendArtifact(existing: String?, payload: Any?): String? {
+        if (payload == null) return existing
+        val line = gson.toJson(payload)
+        return ((existing ?: "") + line + "\n").takeLast(300_000)
     }
 }

@@ -134,7 +134,20 @@ def build_triage_request(
     batch: EvidenceBatch,
     *,
     model: str = DEFAULT_TRIAGE_MODEL,
+    thinking: str = "disabled",
 ) -> dict[str, Any]:
+    if thinking not in {"enabled", "disabled"}:
+        raise TriageValidationError("thinking 只能是 enabled 或 disabled")
+    legacy_max_tokens = env_int(
+        "MIMO_TRIAGE_MAX_COMPLETION_TOKENS",
+        DEFAULT_TRIAGE_MAX_COMPLETION_TOKENS,
+    )
+    max_tokens = env_int(
+        "MIMO_TRIAGE_QUALITY_MAX_COMPLETION_TOKENS"
+        if thinking == "enabled"
+        else "MIMO_TRIAGE_SPEED_MAX_COMPLETION_TOKENS",
+        max(3000, legacy_max_tokens) if thinking == "enabled" else legacy_max_tokens,
+    )
     claim_items = [
         {key: item.get(key) for key in ("编号", "文本", "表达")}
         for item in claims["主张"]
@@ -167,11 +180,8 @@ def build_triage_request(
             "temperature": env_float(
                 "MIMO_TRIAGE_TEMPERATURE", 0.0, minimum=0.0
             ),
-            "thinking": "disabled",
-            "max_completion_tokens": env_int(
-                "MIMO_TRIAGE_MAX_COMPLETION_TOKENS",
-                DEFAULT_TRIAGE_MAX_COMPLETION_TOKENS,
-            ),
+            "thinking": thinking,
+            "max_completion_tokens": max_tokens,
             "response_format": "json_object",
         },
         "消息": [
@@ -193,6 +203,7 @@ async def execute_triage_batches(
     model_client: JsonCompletionModel,
     *,
     model: str = DEFAULT_TRIAGE_MODEL,
+    thinking: str = "disabled",
 ) -> list[TriageBatchOutcome]:
     """Run all batches concurrently; invalid batches fail open to full evidence."""
 
@@ -206,6 +217,7 @@ async def execute_triage_batches(
                     evidence_pool,
                     model_client,
                     model,
+                    thinking,
                 )
                 for batch in batches
             )
@@ -253,6 +265,7 @@ async def run_m5_case(
     *,
     model_client: JsonCompletionModel | None = None,
     triage_model: str = DEFAULT_TRIAGE_MODEL,
+    thinking: str = "disabled",
 ) -> tuple[CaseRunWorkspace, dict[str, Any]]:
     """Run standalone evidence triage and persist its formal M5 interface."""
 
@@ -325,6 +338,7 @@ async def run_m5_case(
             evidence_pool,
             resolved_client,
             model=triage_model,
+            thinking=thinking,
         )
         for outcome in outcomes:
             batch_root = f"{attempt_root}/batches/{outcome.batch.batch_id}"
@@ -411,9 +425,15 @@ async def _execute_one_batch(
     evidence_pool: dict[str, Any],
     model_client: JsonCompletionModel,
     model: str,
+    thinking: str,
 ) -> TriageBatchOutcome:
     request = build_triage_request(
-        claims, verification_plan, evidence_pool, batch, model=model
+        claims,
+        verification_plan,
+        evidence_pool,
+        batch,
+        model=model,
+        thinking=thinking,
     )
     started = time.perf_counter()
     completion: Any = None

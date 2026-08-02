@@ -80,6 +80,8 @@ class JobRuntime:
         content_metadata = changes.pop("content_metadata", None)
         elapsed_ms = changes.pop("elapsed_ms", current.elapsed_ms)
         status = changes.pop("status", current.status)
+        event_kind = changes.pop("event_kind", "stage")
+        payload = changes.pop("payload", None)
         updated = await self.store.update(
             job_id,
             stage=stage,
@@ -100,6 +102,8 @@ class JobRuntime:
             elapsed_ms=elapsed_ms,
             progress_hint=progress_hint,
             content_metadata=content_metadata,
+            event_kind=event_kind,
+            payload=payload,
         ))
         return updated
 

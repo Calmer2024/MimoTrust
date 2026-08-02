@@ -48,6 +48,10 @@ class JobEvent(BaseModel):
     elapsed_ms: int = 0
     progress_hint: int = Field(ge=0, le=100)
     content_metadata: dict[str, Any] | None = None
+    event_kind: Literal[
+        "stage", "thinking_delta", "report_delta", "stream_reset", "artifact"
+    ] = "stage"
+    payload: dict[str, Any] | None = None
     occurred_at: datetime = Field(default_factory=utc_now)
 
 

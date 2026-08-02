@@ -42,8 +42,19 @@ def test_memory_runtime_is_idempotent_and_orders_events() -> None:
         assert second[0].job_id == "job-one"
         await runtime.emit("job-one", "queued", "pending", "已接收", 0)
         await runtime.emit("job-one", "content_resolving", "running", "读取内容", 8)
+        await runtime.emit(
+            "job-one",
+            "report_generating",
+            "running",
+            "正在思考",
+            90,
+            event_kind="thinking_delta",
+            payload={"text": "核对来源"},
+        )
         events = await runtime.events.read("job-one", 0, timeout=0.01)
-        assert [event.sequence for event in events] == [1, 2]
+        assert [event.sequence for event in events] == [1, 2, 3]
+        assert events[-1].event_kind == "thinking_delta"
+        assert events[-1].payload == {"text": "核对来源"}
 
     asyncio.run(scenario())
 

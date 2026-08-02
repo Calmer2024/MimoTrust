@@ -66,6 +66,8 @@ def build_mobile_card(job_id: str, result: AnalyzeResponse, completed_at: dateti
 
 async def process_job(runtime: JobRuntime, job_id: str) -> None:
     started = time.perf_counter()
+    stream_buffers = {"thinking": "", "report": ""}
+    last_stream_emit = {"thinking": started, "report": started}
 
     def elapsed() -> int:
         return round((time.perf_counter() - started) * 1000)
@@ -74,6 +76,45 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
         current = await runtime.store.get(job_id)
         if current and current.cancel_requested:
             raise JobCancelled()
+
+    async def flush_stream(kind: str, *, force: bool = False) -> None:
+        text = stream_buffers.get(kind, "")
+        if not text:
+            return
+        now = time.perf_counter()
+        if not force and len(text) < 120 and now - last_stream_emit[kind] < 0.2:
+            return
+        stream_buffers[kind] = ""
+        last_stream_emit[kind] = now
+        await runtime.emit(
+            job_id,
+            "report_generating",
+            "running",
+            "正在形成最终核验报告",
+            90,
+            elapsed_ms=elapsed(),
+            event_kind=f"{kind}_delta",
+            payload={"text": text},
+        )
+
+    async def on_stream(kind: str, text: str) -> None:
+        if kind not in stream_buffers or not text:
+            return
+        stream_buffers[kind] += text
+        await flush_stream(kind, force="\n" in text)
+
+    async def on_product(payload: dict[str, Any]) -> None:
+        current = await runtime.store.get(job_id)
+        await runtime.emit(
+            job_id,
+            "evidence_retrieval",
+            "running",
+            str(payload.get("title") or "已生成阶段结果"),
+            current.progress_hint if current else 0,
+            elapsed_ms=elapsed(),
+            event_kind="artifact",
+            payload=payload,
+        )
 
     try:
         job = await runtime.store.get(job_id)
@@ -105,6 +146,20 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
                 verify=False,
             ))
         await ensure_not_cancelled()
+        metadata = result.metadata
+        await on_product({
+            "kind": "content",
+            "title": "已读取分享内容",
+            "summary": str(metadata.title or result.summary or "已完成内容解析"),
+            "items": [
+                {
+                    "label": "来源",
+                    "text": str(metadata.platform),
+                    "meta": str(metadata.content_type),
+                    "url": str(metadata.webpage_url or ""),
+                }
+            ],
+        })
         await runtime.emit(
             job_id, "claim_structuring", "running",
             f"已识别 {len(result.structured_data.claims)} 条待核验主张",
@@ -127,7 +182,19 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             await ensure_not_cancelled()
             mapped = STAGE_DETAILS.get(stage)
             if mapped:
-                await runtime.emit(job_id, mapped[0], "running", mapped[1], mapped[2], elapsed_ms=elapsed())
+                retrying = stage.startswith("M6 输出未完成")
+                if retrying:
+                    stream_buffers["thinking"] = ""
+                    stream_buffers["report"] = ""
+                await runtime.emit(
+                    job_id,
+                    mapped[0],
+                    "running",
+                    mapped[1],
+                    mapped[2],
+                    elapsed_ms=elapsed(),
+                    event_kind="stream_reset" if retrying else "stage",
+                )
 
         from app.trust.service import verify_structured_information
         result.verification = await verify_structured_information(
@@ -135,7 +202,11 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             job.verification_mode,
             source_url=result.metadata.webpage_url,
             progress=on_stage,
+            stream=on_stream,
+            product=on_product,
         )
+        await flush_stream("thinking", force=True)
+        await flush_stream("report", force=True)
         result.full_pipeline_milliseconds = max(result.full_pipeline_milliseconds, elapsed())
         completed_at = utc_now()
         card = build_mobile_card(job_id, result, completed_at)

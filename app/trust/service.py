@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 
 from app.models import StructuredInformation
-from app.trust.pipeline_v2.config import env_text
+from app.trust.pipeline_v2.config import env_float, env_text
 from app.trust.pipeline_v2.normalization import (
     write_json_atomic,
 )
@@ -59,6 +59,7 @@ def _project_evidence(report: dict[str, Any]) -> list[dict[str, Any]]:
                 "published_date": str(item.get("发布日期") or ""),
                 "author": str(item.get("作者") or ""),
                 "relation": str(item.get("关系") or ""),
+                "snippet": str(item.get("摘要") or ""),
             }
     return list(evidence.values())
 
@@ -133,6 +134,7 @@ def _client_result(
         "run_id": workspace.run_id,
         "verification_mode": verification_mode,
         "overall_verdict": overall.get("结论", "待核实"),
+        "topic": report.get("主题", ""),
         "conclusion": overall.get("摘要", ""),
         "sharing_advice": overall.get("传播建议", ""),
         "claim_checks": checks,
@@ -202,6 +204,8 @@ async def verify_structured_information(
     *,
     source_url: str | None = None,
     progress: ProgressCallback | None = None,
+    stream: Callable[[str, str], None | Awaitable[None]] | None = None,
+    product: Callable[[dict[str, Any]], None | Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run the embedded M1-M7 pipeline over the native compact-claim JSON."""
 
@@ -221,6 +225,13 @@ async def verify_structured_information(
     case_dir = _cases_root / case_id
     input_path = case_dir / "input.json"
     emit = progress or (lambda _: None)
+    quality = verification_mode == "quality"
+    thinking = "enabled" if quality else "disabled"
+    retrieval_timeout_seconds = env_float(
+        "EXA_QUALITY_TIMEOUT_SECONDS" if quality else "EXA_SPEED_TIMEOUT_SECONDS",
+        20.0 if quality else 10.0,
+        minimum=0.1,
+    )
 
     async with _verification_lock:
         case_dir.mkdir(parents=True, exist_ok=True)
@@ -231,9 +242,12 @@ async def verify_structured_information(
             planning_model=env_text("MIMO_PLANNING_MODEL", "mimo-v2.5"),
             triage_model=env_text("MIMO_TRIAGE_MODEL", "mimo-v2.5-pro"),
             report_model=env_text("MIMO_REPORT_MODEL", "mimo-v2.5-pro"),
-            report_thinking=(
-                "enabled" if verification_mode == "quality" else "disabled"
-            ),
+            planning_thinking=thinking,
+            triage_thinking=thinking,
+            report_thinking=thinking,
+            retrieval_timeout_seconds=retrieval_timeout_seconds,
             progress=emit,
+            stream=stream,
+            product=product,
         )
     return _client_result(workspace, verification_mode)

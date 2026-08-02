@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 from urllib.parse import urlsplit
 
 from .config import env_float, env_int
@@ -64,6 +64,13 @@ class SynthesisModel(Protocol):
     async def complete(self, request: dict[str, Any]) -> SynthesisCompletion:
         """Return one OpenAI-compatible JSON completion."""
 
+    async def complete_stream(
+        self,
+        request: dict[str, Any],
+        on_delta: Callable[[str, str], Awaitable[None]],
+    ) -> SynthesisCompletion:
+        """Return a completion while forwarding reasoning/report deltas."""
+
 
 class MimoSynthesisModel:
     def __init__(
@@ -112,6 +119,111 @@ class MimoSynthesisModel:
             cached_input_tokens=getattr(prompt_details, "cached_tokens", None),
             total_tokens=getattr(usage, "total_tokens", None),
         )
+
+    async def complete_stream(
+        self,
+        request: dict[str, Any],
+        on_delta: Callable[[str, str], Awaitable[None]],
+    ) -> SynthesisCompletion:
+        """Stream MiMo reasoning and report content while retaining final validation."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError as error:
+            raise RuntimeError("缺少 openai 依赖，请先安装项目依赖") from error
+
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=self.timeout_seconds,
+        )
+        stream = await client.chat.completions.create(
+            model=request["模型"],
+            messages=request["消息"],
+            temperature=request["参数"]["temperature"],
+            max_completion_tokens=request["参数"]["max_completion_tokens"],
+            response_format={"type": "json_object"},
+            extra_body={"thinking": {"type": request["参数"]["thinking"]}},
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        output: list[str] = []
+        response_id = None
+        response_model = None
+        finish_reason = None
+        usage = None
+        tagged_thinking = False
+        pending_content = ""
+        async for chunk in stream:
+            response_id = response_id or getattr(chunk, "id", None)
+            response_model = response_model or getattr(chunk, "model", None)
+            usage = getattr(chunk, "usage", None) or usage
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                continue
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                await on_delta("thinking", str(reasoning))
+            content = getattr(delta, "content", None)
+            if not content:
+                continue
+            pending_content += str(content)
+            while pending_content:
+                tag = "</think>" if tagged_thinking else "<think>"
+                tag_index = pending_content.find(tag)
+                if tag_index >= 0:
+                    before = pending_content[:tag_index]
+                    if before:
+                        if tagged_thinking:
+                            await on_delta("thinking", before)
+                        else:
+                            output.append(before)
+                            await on_delta("report", before)
+                    pending_content = pending_content[tag_index + len(tag):]
+                    tagged_thinking = not tagged_thinking
+                    continue
+                ready, pending_content = _split_tag_prefix(pending_content, tag)
+                if ready:
+                    if tagged_thinking:
+                        await on_delta("thinking", ready)
+                    else:
+                        output.append(ready)
+                        await on_delta("report", ready)
+                break
+
+        if pending_content:
+            if tagged_thinking:
+                await on_delta("thinking", pending_content)
+            else:
+                output.append(pending_content)
+                await on_delta("report", pending_content)
+
+        completion_details = getattr(usage, "completion_tokens_details", None)
+        prompt_details = getattr(usage, "prompt_tokens_details", None)
+        return SynthesisCompletion(
+            raw_output="".join(output).strip(),
+            response_id=response_id,
+            model=response_model,
+            finish_reason=finish_reason,
+            input_tokens=getattr(usage, "prompt_tokens", None),
+            output_tokens=getattr(usage, "completion_tokens", None),
+            reasoning_tokens=getattr(completion_details, "reasoning_tokens", None),
+            cached_input_tokens=getattr(prompt_details, "cached_tokens", None),
+            total_tokens=getattr(usage, "total_tokens", None),
+        )
+
+
+def _split_tag_prefix(text: str, tag: str) -> tuple[str, str]:
+    """Retain a suffix that may be the start of a tag split across chunks."""
+    max_prefix = min(len(text), len(tag) - 1)
+    for length in range(max_prefix, 0, -1):
+        if text.endswith(tag[:length]):
+            return text[:-length], text[-length:]
+    return text, ""
 
 
 def build_report_request(
@@ -269,6 +381,7 @@ async def run_m6_case(
     report_client: SynthesisModel | None = None,
     report_model: str = DEFAULT_REPORT_MODEL,
     thinking: str = DEFAULT_REPORT_THINKING,
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> tuple[CaseRunWorkspace, dict[str, Any]]:
     workspace = CaseRunWorkspace.open_existing(cases_root, case_id, run_id)
     stages = _read_run_stages(workspace)
@@ -284,6 +397,8 @@ async def run_m6_case(
     artifacts: list[str] = []
     report_wall_ms = 0
     report_completion: SynthesisCompletion | None = None
+    streamed_thinking: list[str] = []
+    streamed_report: list[str] = []
     try:
         claims = workspace.read_artifact("01_claims.json")
         plan = workspace.read_artifact("02_verification_plan.json")
@@ -305,10 +420,34 @@ async def run_m6_case(
 
         resolved_report_client = report_client or create_mimo_synthesis_model()
         report_started = time.perf_counter()
+
+        async def capture_stream(kind: str, text: str) -> None:
+            if kind == "thinking":
+                streamed_thinking.append(text)
+            elif kind == "report":
+                streamed_report.append(text)
+            if stream_callback is not None:
+                await stream_callback(kind, text)
+
         try:
-            report_completion = await resolved_report_client.complete(report_request)
+            if stream_callback is not None and hasattr(
+                resolved_report_client, "complete_stream"
+            ):
+                report_completion = await resolved_report_client.complete_stream(
+                    report_request, capture_stream
+                )
+            else:
+                report_completion = await resolved_report_client.complete(report_request)
         except Exception as error:
             report_wall_ms = _elapsed_ms(report_started)
+            if streamed_thinking:
+                name = f"{attempt_root}/thinking.txt"
+                workspace.write_text_artifact(name, "".join(streamed_thinking))
+                artifacts.append(name)
+            if streamed_report:
+                name = f"{attempt_root}/report_raw.txt"
+                workspace.write_text_artifact(name, "".join(streamed_report))
+                artifacts.append(name)
             metrics_name = f"{attempt_root}/metrics.json"
             workspace.write_artifact(
                 metrics_name,
@@ -317,6 +456,16 @@ async def run_m6_case(
             artifacts.append(metrics_name)
             raise
         report_wall_ms = _elapsed_ms(report_started)
+        if streamed_thinking:
+            name = f"{attempt_root}/thinking.txt"
+            workspace.write_text_artifact(name, "".join(streamed_thinking))
+            artifacts.append(name)
+        if streamed_report or report_completion.raw_output:
+            name = f"{attempt_root}/report_raw.txt"
+            workspace.write_text_artifact(
+                name, "".join(streamed_report) or report_completion.raw_output
+            )
+            artifacts.append(name)
         metrics_name = f"{attempt_root}/metrics.json"
         workspace.write_artifact(
             metrics_name,

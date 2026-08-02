@@ -111,11 +111,15 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
     ui = (root / "ui/MimoTrustApp.kt").read_text(encoding="utf-8")
 
     for field in (
+        "topic",
+        "overallVerdict",
         "sharingAdvice",
         "claimChecks",
         "narrativeAnalysis",
         "evidenceGaps",
         "evidenceUsed",
+        "evidenceReviewedCount",
+        "evidenceSelectedCount",
         "reportMarkdown",
     ):
         assert field in dto
@@ -129,11 +133,38 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
     ):
         assert field in repository
         assert field in entity
+    for field in ("claimDetails", "sharingAdvice", "narrativeAnalysis", "evidenceGaps", "keyEvidence"):
         assert f"job.{field}" in ui
-    assert "version = 4" in database
+    assert "version = 6" in database
     assert "MIGRATION_1_2" in database
     assert "MIGRATION_2_3" in database
     assert "MIGRATION_3_4" in database
+    assert "MIGRATION_4_5" in database
+    assert "MIGRATION_5_6" in database
     assert "extractedMetadata" in database
-    for migration in ("MIGRATION_1_2", "MIGRATION_2_3", "MIGRATION_3_4"):
+    for migration in (
+        "MIGRATION_1_2",
+        "MIGRATION_2_3",
+        "MIGRATION_3_4",
+        "MIGRATION_4_5",
+        "MIGRATION_5_6",
+    ):
         assert f"MimoDatabase.{migration}" in application
+    for field in ("thinkingText", "reportDraft", "reportJson"):
+        assert field in entity
+        assert field in database
+    assert "模型思考过程" in ui
+    assert "StructuredReport(job)" in ui
+    assert "综合判定" in ui
+    assert "证据充分度" in ui
+    assert "逐项核验" in ui
+    assert "ReportHero" in ui
+    assert "ClaimReportCard" in ui
+    assert "EvidenceLink" in ui
+    assert "LocalUriHandler" in ui
+    assert "processArtifacts" in entity
+    assert "ProcessArtifacts" in ui
+    assert "查看全部" in ui
+    assert 'getSharedPreferences("mimo-ui"' in ui
+    assert 'putString("verification-mode"' in ui
+    assert "VerificationModeControl" in ui

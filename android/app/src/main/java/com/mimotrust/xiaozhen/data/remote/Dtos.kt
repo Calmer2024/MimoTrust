@@ -32,6 +32,8 @@ data class JobEventDto(
     @SerializedName("elapsed_ms") val elapsedMs: Long,
     @SerializedName("progress_hint") val progressHint: Int,
     @SerializedName("content_metadata") val contentMetadata: ContentMetadataDto? = null,
+    @SerializedName("event_kind") val eventKind: String = "stage",
+    val payload: JobEventPayloadDto? = null,
 )
 
 data class ContentMetadataDto(
@@ -44,6 +46,21 @@ data class ContentMetadataDto(
     val topic: String? = null,
     @SerializedName("claim_count") val claimCount: Int? = null,
     @SerializedName("transcript_chars") val transcriptChars: Int? = null,
+)
+
+data class JobEventPayloadDto(
+    val text: String? = null,
+    val kind: String? = null,
+    val title: String? = null,
+    val summary: String? = null,
+    val items: List<JobArtifactItemDto>? = null,
+)
+
+data class JobArtifactItemDto(
+    val label: String? = null,
+    val text: String? = null,
+    val meta: String? = null,
+    val url: String? = null,
 )
 
 data class MobileCardDto(
@@ -63,8 +80,11 @@ data class ClaimCheckDto(
     @SerializedName("claim_id") val claimId: String? = null,
     val claim: String? = null,
     val verdict: String? = null,
+    val category: String? = null,
+    @SerializedName("evidence_sufficiency") val evidenceSufficiency: String? = null,
     val basis: String? = null,
     val uncertainty: String? = null,
+    @SerializedName("source_ids") val sourceIds: List<String>? = null,
 )
 
 data class NarrativeAnalysisDto(
@@ -81,14 +101,20 @@ data class EvidenceDto(
     @SerializedName("published_date") val publishedDate: String? = null,
     val author: String? = null,
     val relation: String? = null,
+    val snippet: String? = null,
 )
 
 data class VerificationDetailsDto(
+    val topic: String? = null,
+    @SerializedName("overall_verdict") val overallVerdict: String? = null,
+    val conclusion: String? = null,
     @SerializedName("sharing_advice") val sharingAdvice: String? = null,
     @SerializedName("claim_checks") val claimChecks: List<ClaimCheckDto>? = null,
     @SerializedName("narrative_analysis") val narrativeAnalysis: NarrativeAnalysisDto? = null,
     @SerializedName("evidence_gaps") val evidenceGaps: List<String>? = null,
     @SerializedName("evidence_used") val evidenceUsed: List<EvidenceDto>? = null,
+    @SerializedName("evidence_reviewed_count") val evidenceReviewedCount: Int = 0,
+    @SerializedName("evidence_selected_count") val evidenceSelectedCount: Int = 0,
     @SerializedName("report_markdown") val reportMarkdown: String? = null,
 )
 

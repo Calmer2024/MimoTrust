@@ -366,6 +366,7 @@ def _evidence_reference(item: dict[str, Any]) -> dict[str, Any]:
             item.get("发布日期"), f"{evidence_id}.发布日期"
         ),
         "作者": _optional_text(item.get("作者"), f"{evidence_id}.作者"),
+        "摘要": " ".join(_string_list(item.get("摘要") or [], f"{evidence_id}.摘要"))[:500],
     }
 
 

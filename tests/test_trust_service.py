@@ -116,7 +116,6 @@ def test_empty_structured_information_skips_verification() -> None:
             StructuredInformation(主题="没有可核验主张", 主张=[])
         )
     )
-
     assert result["status"] == "skipped"
     assert result["case_id"].startswith("case-")
     assert result["message"] == "当前内容没有需要外部事实核验的现实世界主张。"
@@ -152,7 +151,7 @@ def test_cached_verification_restores_complete_report(monkeypatch) -> None:
     assert restored["report"]["主题"] == "从磁盘恢复的完整报告"
 
 
-def test_verification_mode_only_selects_m6_thinking_and_preserves_native_input(
+def test_verification_mode_selects_all_thinking_and_retrieval_budget(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -205,11 +204,27 @@ def test_verification_mode_only_selects_m6_thinking_and_preserves_native_input(
             progress=progress.append,
         )
     )
+    speed_result = asyncio.run(
+        verify_structured_information(
+            structured,
+            "speed",
+            source_url="https://example.com/video/2",
+            progress=progress.append,
+        )
+    )
 
     assert captured[0]["report_thinking"] == "enabled"
+    assert captured[0]["planning_thinking"] == "enabled"
+    assert captured[0]["triage_thinking"] == "enabled"
+    assert captured[0]["retrieval_timeout_seconds"] == 20.0
+    assert captured[1]["report_thinking"] == "disabled"
+    assert captured[1]["planning_thinking"] == "disabled"
+    assert captured[1]["triage_thinking"] == "disabled"
+    assert captured[1]["retrieval_timeout_seconds"] == 10.0
     assert captured[0]["payload"] == structured.model_dump(by_alias=True)
-    assert progress == ["M1 输入规范化与稳定编号"]
+    assert progress == ["M1 输入规范化与稳定编号"] * 2
     assert result["verification_mode"] == "quality"
+    assert speed_result["verification_mode"] == "speed"
 
 
 def test_verify_endpoint_persists_result_to_requested_cache(monkeypatch) -> None:

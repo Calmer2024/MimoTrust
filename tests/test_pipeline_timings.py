@@ -143,9 +143,11 @@ def test_fresh_analyze_request_records_real_entry_and_thumbnail_stages(
 
 
 def test_analyze_stream_emits_progress_before_result(monkeypatch) -> None:
-    async def fake_execute(_request, progress=None):
+    async def fake_execute(_request, progress=None, stream=None, product=None):
         await progress("M1 输入规范化与稳定编号")
         await progress("M2 检索规划与核验需求")
+        await stream("thinking", "正在核对证据")
+        await product({"kind": "claims", "title": "核心主张", "items": []})
         return _result()
 
     monkeypatch.setattr(main_module, "_execute_analysis", fake_execute)
@@ -158,16 +160,20 @@ def test_analyze_stream_emits_progress_before_result(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.text.index("event: progress") < response.text.index("event: result")
+    assert response.text.index("event: thinking_delta") < response.text.index("event: result")
+    assert response.text.index("event: artifact") < response.text.index("event: result")
     assert "M1 输入规范化与稳定编号" in response.text
     assert '"protocol_version": "compact-claims-v2"' in response.text
 
 
 def test_upload_stream_emits_progress_before_result(monkeypatch) -> None:
     async def fake_execute(
-        _title, _text, _files, _verify, _verification_mode, progress=None
+        _title, _text, _files, _verify, _verification_mode, progress=None, stream=None, product=None
     ):
         await progress("正在理解上传材料并提取核心主张")
         await progress("M1 输入规范化与稳定编号")
+        await stream("report", '{"o":')
+        await product({"kind": "plan", "title": "检索计划", "items": []})
         return _result()
 
     monkeypatch.setattr(main_module, "_execute_uploaded_analysis", fake_execute)
@@ -184,4 +190,6 @@ def test_upload_stream_emits_progress_before_result(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.text.index("event: progress") < response.text.index("event: result")
+    assert response.text.index("event: report_delta") < response.text.index("event: result")
+    assert response.text.index("event: artifact") < response.text.index("event: result")
     assert "正在理解上传材料并提取核心主张" in response.text

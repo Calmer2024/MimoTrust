@@ -18,6 +18,8 @@ class MimoTrustApplication : Application() {
                 MimoDatabase.MIGRATION_1_2,
                 MimoDatabase.MIGRATION_2_3,
                 MimoDatabase.MIGRATION_3_4,
+                MimoDatabase.MIGRATION_4_5,
+                MimoDatabase.MIGRATION_5_6,
             )
             .build()
         val notifier = VerificationNotifier(this)

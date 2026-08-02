@@ -27,5 +27,9 @@ data class JobEntity(
     val reportUrl: String? = null,
     val aiDisclaimer: String? = null,
     val extractedMetadata: String? = null,
+    val thinkingText: String? = null,
+    val reportDraft: String? = null,
+    val reportJson: String? = null,
+    val processArtifacts: String? = null,
 )
 

@@ -107,11 +107,24 @@ def build_planning_request(
     claims: dict[str, Any],
     *,
     model: str = DEFAULT_MODEL,
+    thinking: str = "disabled",
     current_date: date | None = None,
 ) -> dict[str, Any]:
     """Build the exact request artifact sent to the planning model."""
 
     _validate_claims_artifact(claims)
+    if thinking not in {"enabled", "disabled"}:
+        raise PlanningValidationError("thinking 只能是 enabled 或 disabled")
+    legacy_max_tokens = env_int(
+        "MIMO_PLANNING_MAX_COMPLETION_TOKENS",
+        DEFAULT_MAX_COMPLETION_TOKENS,
+    )
+    max_tokens = env_int(
+        "MIMO_PLANNING_QUALITY_MAX_COMPLETION_TOKENS"
+        if thinking == "enabled"
+        else "MIMO_PLANNING_SPEED_MAX_COMPLETION_TOKENS",
+        max(4800, legacy_max_tokens) if thinking == "enabled" else legacy_max_tokens,
+    )
     today = current_date or date.today()
     system_prompt = _system_prompt()
     claim_checklist = "、".join(item["编号"] for item in claims["主张"])
@@ -137,11 +150,8 @@ def build_planning_request(
             "temperature": env_float(
                 "MIMO_PLANNING_TEMPERATURE", 0.1, minimum=0.0
             ),
-            "thinking": "disabled",
-            "max_completion_tokens": env_int(
-                "MIMO_PLANNING_MAX_COMPLETION_TOKENS",
-                DEFAULT_MAX_COMPLETION_TOKENS,
-            ),
+            "thinking": thinking,
+            "max_completion_tokens": max_tokens,
             "response_format": "json_object",
         },
         "消息": [
@@ -334,6 +344,7 @@ async def run_m2_case(
     *,
     planner: PlanningModel | None = None,
     model: str = DEFAULT_MODEL,
+    thinking: str = "disabled",
 ) -> tuple[CaseRunWorkspace, dict[str, Any]]:
     """Run M2 against one immutable M1 run and persist its full audit trail."""
 
@@ -350,7 +361,7 @@ async def run_m2_case(
     metrics_written = False
     try:
         claims = workspace.read_artifact("01_claims.json")
-        request = build_planning_request(claims, model=model)
+        request = build_planning_request(claims, model=model, thinking=thinking)
         workspace.write_artifact("02_planning_input.json", request["审计输入"])
         artifacts.append("02_planning_input.json")
 

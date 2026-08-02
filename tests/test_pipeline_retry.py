@@ -4,7 +4,13 @@ import asyncio
 from types import SimpleNamespace
 
 import app.trust.pipeline_v2.pipeline as pipeline_module
-from app.trust.pipeline_v2.synthesis import SynthesisValidationError
+from app.trust.pipeline_v2.synthesis import SynthesisValidationError, _split_tag_prefix
+
+
+def test_think_tag_prefix_is_retained_across_stream_chunks() -> None:
+    assert _split_tag_prefix("report<thi", "<think>") == ("report", "<thi")
+    assert _split_tag_prefix("reason</th", "</think>") == ("reason", "</th")
+    assert _split_tag_prefix("plain text", "<think>") == ("plain text", "")
 
 
 def test_full_pipeline_retries_only_m6_after_invalid_model_output(
@@ -23,9 +29,11 @@ def test_full_pipeline_retries_only_m6_after_invalid_model_output(
 
     async def fake_async_stage(name, *_args, **_kwargs):
         stage_calls.append(name)
+        return workspace, {}
 
     def fake_sync_stage(name, *_args, **_kwargs):
         stage_calls.append(name)
+        return workspace, {}
 
     attempts = 0
 

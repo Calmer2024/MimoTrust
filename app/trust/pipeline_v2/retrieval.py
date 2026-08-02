@@ -11,7 +11,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from inspect import isawaitable
+from typing import Any, Awaitable, Callable, Mapping
 
 import httpx
 
@@ -32,6 +33,9 @@ _VERIFICATION_ID_PATTERN = re.compile(r"^V[1-9][0-9]*$")
 _EXA_PROVIDER_NAME = "exa"
 DEFAULT_EXA_NUM_RESULTS = 5
 DEFAULT_EXA_TIMEOUT_SECONDS = 10.0
+RetrievalResultCallback = Callable[
+    [dict[str, Any]], None | Awaitable[None]
+]
 
 
 class RetrievalValidationError(ValueError):
@@ -121,14 +125,20 @@ def validate_retrieval_plan(plan: Any) -> dict[str, Any]:
     return plan
 
 
-def expand_retrieval_tasks(plan: dict[str, Any]) -> list[RetrievalTask]:
+def expand_retrieval_tasks(
+    plan: dict[str, Any],
+    *,
+    timeout_seconds: float | None = None,
+) -> list[RetrievalTask]:
     """Map every logical query to one stable Exa task."""
 
     validate_retrieval_plan(plan)
     tasks: list[RetrievalTask] = []
     limit = env_int("EXA_NUM_RESULTS", DEFAULT_EXA_NUM_RESULTS)
-    timeout_seconds = env_float(
-        "EXA_TIMEOUT_SECONDS", DEFAULT_EXA_TIMEOUT_SECONDS, minimum=0.1
+    resolved_timeout_seconds = (
+        env_float("EXA_TIMEOUT_SECONDS", DEFAULT_EXA_TIMEOUT_SECONDS, minimum=0.1)
+        if timeout_seconds is None
+        else max(0.1, timeout_seconds)
     )
     for query in plan["查询"]:
         tasks.append(
@@ -140,7 +150,7 @@ def expand_retrieval_tasks(plan: dict[str, Any]) -> list[RetrievalTask]:
                 provider=_EXA_PROVIDER_NAME,
                 query=query["文本"].strip(),
                 limit=limit,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=resolved_timeout_seconds,
             )
         )
     return tasks
@@ -149,14 +159,27 @@ def expand_retrieval_tasks(plan: dict[str, Any]) -> list[RetrievalTask]:
 async def execute_retrieval_tasks(
     tasks: list[RetrievalTask],
     providers: Mapping[str, SearchProvider],
+    *,
+    result_callback: RetrievalResultCallback | None = None,
 ) -> list[dict[str, Any]]:
     """Execute every task concurrently while isolating timeout and provider errors."""
 
-    return list(
-        await asyncio.gather(
-            *(_execute_one_task(task, providers) for task in tasks)
-        )
-    )
+    async def indexed(index: int, task: RetrievalTask) -> tuple[int, dict[str, Any]]:
+        return index, await _execute_one_task(task, providers)
+
+    pending = [
+        asyncio.create_task(indexed(index, task))
+        for index, task in enumerate(tasks)
+    ]
+    outcomes: list[dict[str, Any] | None] = [None] * len(tasks)
+    for completed in asyncio.as_completed(pending):
+        index, outcome = await completed
+        outcomes[index] = outcome
+        if result_callback is not None:
+            emitted = result_callback(outcome)
+            if isawaitable(emitted):
+                await emitted
+    return [outcome for outcome in outcomes if outcome is not None]
 
 
 async def run_m3_case(
@@ -165,6 +188,8 @@ async def run_m3_case(
     run_id: str | None = None,
     *,
     providers: Mapping[str, SearchProvider] | None = None,
+    timeout_seconds: float | None = None,
+    result_callback: RetrievalResultCallback | None = None,
 ) -> tuple[CaseRunWorkspace, dict[str, Any]]:
     """Run M3 using the saved formal M2 artifact from the same immutable run."""
 
@@ -182,7 +207,7 @@ async def run_m3_case(
         )
         if plan["案例编号"] != workspace.case_id:
             raise RetrievalValidationError("检索计划案例编号与运行目录不一致")
-        tasks = expand_retrieval_tasks(plan)
+        tasks = expand_retrieval_tasks(plan, timeout_seconds=timeout_seconds)
         input_artifact = {
             "版本": RETRIEVAL_PROTOCOL_VERSION,
             "案例编号": workspace.case_id,
@@ -201,7 +226,11 @@ async def run_m3_case(
                 headers={"User-Agent": "MimoTrust/0.1"},
             )
             resolved_providers = create_default_providers(owned_client)
-        outcomes = await execute_retrieval_tasks(tasks, resolved_providers)
+        outcomes = await execute_retrieval_tasks(
+            tasks,
+            resolved_providers,
+            result_callback=result_callback,
+        )
         retrieval = {
             "版本": RETRIEVAL_PROTOCOL_VERSION,
             "案例编号": workspace.case_id,

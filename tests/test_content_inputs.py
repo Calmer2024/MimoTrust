@@ -1,7 +1,25 @@
+import inspect
+
+from app import mimo
 from app.content import extract_article
 from app.main import _is_direct_video_url, app
 from app.security import resolve_content_input, validate_video_url
 from fastapi.testclient import TestClient
+
+
+def test_claim_extraction_preserves_narrator_conclusion_and_scope_shift() -> None:
+    prompt_source = inspect.getsource(mimo.structure_information)
+
+    assert "必须保留内容的核心落点" in prompt_source
+    assert "严格区分“引用依据”和“作者结论”" in prompt_source
+    assert "外推后的结论" in prompt_source
+    assert "权威性依据" in prompt_source
+    expression_schema = mimo.STRUCTURED_INFORMATION_SCHEMA["properties"]["主张"][
+        "items"
+    ]["properties"]["表达"]
+    assert "内容作者明确断言" in expression_schema["description"]
+    assert "命题仅归属于新闻、研究或他人" in expression_schema["description"]
+    assert "仍属于直接，不属于隐含" in expression_schema["description"]
 
 
 def test_extract_article_prefers_article_body_and_metadata() -> None:

@@ -224,6 +224,8 @@ async def thumbnail(key: str) -> FileResponse:
 async def _execute_analysis(
     request: AnalyzeRequest,
     progress: Callable[[str], None | Awaitable[None]] | None = None,
+    stream: Callable[[str, str], None | Awaitable[None]] | None = None,
+    product: Callable[[dict[str, object]], None | Awaitable[None]] | None = None,
 ) -> AnalyzeResponse:
     async def emit(message: str) -> None:
         if progress is None:
@@ -269,6 +271,8 @@ async def _execute_analysis(
                         request.verification_mode,
                         source_url=cached_result.metadata.webpage_url,
                         progress=progress,
+                        stream=stream,
+                        product=product,
                     )
                     verification_added = True
                 except Exception as exc:
@@ -342,6 +346,8 @@ async def _execute_analysis(
                 request.verification_mode,
                 source_url=result.metadata.webpage_url,
                 progress=progress,
+                stream=stream,
+                product=product,
             )
         except Exception as exc:
             result.verification = {
@@ -380,9 +386,17 @@ async def analyze_content_stream(request: AnalyzeRequest) -> StreamingResponse:
         async def emit(message: str) -> None:
             await queue.put(("progress", {"type": "progress", "message": message}))
 
+        async def emit_stream(kind: str, text: str) -> None:
+            await queue.put((f"{kind}_delta", {"type": f"{kind}_delta", "text": text}))
+
+        async def emit_product(payload: dict[str, object]) -> None:
+            await queue.put(("artifact", {"type": "artifact", "data": payload}))
+
         async def worker() -> None:
             try:
-                result = await _execute_analysis(request, emit)
+                result = await _execute_analysis(
+                    request, emit, emit_stream, emit_product
+                )
                 await queue.put(("result", {
                     "type": "result",
                     "data": result.model_dump(mode="json", by_alias=True),
@@ -424,6 +438,8 @@ async def _execute_uploaded_analysis(
     verify: bool,
     verification_mode: Literal["speed", "quality"],
     progress: Callable[[str], None | Awaitable[None]] | None = None,
+    stream: Callable[[str, str], None | Awaitable[None]] | None = None,
+    product: Callable[[dict[str, object]], None | Awaitable[None]] | None = None,
 ) -> AnalyzeResponse:
     async def emit(message: str) -> None:
         if progress is None:
@@ -454,6 +470,8 @@ async def _execute_uploaded_analysis(
                 verification_mode,
                 source_url=result.metadata.webpage_url,
                 progress=progress,
+                stream=stream,
+                product=product,
             )
         except Exception as exc:
             result.verification = {"status": "failed", "message": str(exc)}
@@ -495,10 +513,23 @@ async def analyze_uploaded_content_stream(
         async def emit(message: str) -> None:
             await queue.put(("progress", {"type": "progress", "message": message}))
 
+        async def emit_stream(kind: str, text: str) -> None:
+            await queue.put((f"{kind}_delta", {"type": f"{kind}_delta", "text": text}))
+
+        async def emit_product(payload: dict[str, object]) -> None:
+            await queue.put(("artifact", {"type": "artifact", "data": payload}))
+
         async def worker() -> None:
             try:
                 result = await _execute_uploaded_analysis(
-                    title, text, files, verify, verification_mode, emit
+                    title,
+                    text,
+                    files,
+                    verify,
+                    verification_mode,
+                    emit,
+                    emit_stream,
+                    emit_product,
                 )
                 await queue.put(("result", {
                     "type": "result",

@@ -1,6 +1,7 @@
 package com.mimotrust.xiaozhen.ui
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -15,7 +16,14 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +33,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -63,11 +73,14 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -80,6 +93,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -93,9 +107,15 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mimotrust.xiaozhen.R
 import com.mimotrust.xiaozhen.data.local.JobEntity
+import com.mimotrust.xiaozhen.data.remote.VerificationDetailsDto
+import com.mimotrust.xiaozhen.data.remote.ClaimCheckDto
+import com.mimotrust.xiaozhen.data.remote.EvidenceDto
+import com.mimotrust.xiaozhen.data.remote.JobEventPayloadDto
 import com.mimotrust.xiaozhen.overlay.FloatingBallManager
 import com.composables.icons.lucide.*
+import com.google.gson.Gson
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -181,14 +201,23 @@ private fun ChatScreen(
     composerBottomInset: Dp,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val preferences = remember(context) {
+        context.getSharedPreferences("mimo-ui", Context.MODE_PRIVATE)
+    }
     var input by remember { mutableStateOf("") }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
-    var verificationMode by remember { mutableStateOf("speed") }
+    var verificationMode by remember {
+        mutableStateOf(
+            preferences.getString("verification-mode", "speed")
+                ?.takeIf { it in setOf("speed", "quality") }
+                ?: "speed"
+        )
+    }
     var videoUri by remember { mutableStateOf<Uri?>(null) }
     var waitingForNewMessage by remember { mutableStateOf(false) }
     var newestJobBeforeSend by remember { mutableStateOf<String?>(null) }
     val visibleJobs = jobs.take(3).reversed()
-    val context = LocalContext.current
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let { input = it }
@@ -210,6 +239,12 @@ private fun ChatScreen(
             videoUri = null
         }
     }
+    val activeJob = jobs.firstOrNull { it.status == "queued" || it.status == "running" }
+    rememberFollowLatestListState(
+        state = listState,
+        contentKey = Triple(activeJob?.sequence, activeJob?.processArtifacts?.length, activeJob?.thinkingText?.length),
+        enabled = activeJob != null,
+    )
 
     LaunchedEffect(jobs.firstOrNull()?.jobId, waitingForNewMessage) {
         val newestJobId = jobs.firstOrNull()?.jobId
@@ -240,8 +275,6 @@ private fun ChatScreen(
         BrandHeader(
             Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(3f).background(Paper)
                 .padding(start = 22.dp, top = 8.dp, end = 22.dp, bottom = 6.dp),
-            verificationMode = verificationMode,
-            onModeChange = { verificationMode = it },
         )
 
         Box(
@@ -251,6 +284,11 @@ private fun ChatScreen(
             ChatComposer(
                 value = input,
                 onValueChange = { input = it },
+                verificationMode = verificationMode,
+                onVerificationModeChange = { mode ->
+                    verificationMode = mode
+                    preferences.edit().putString("verification-mode", mode).apply()
+                },
                 photo = photo,
                 videoUri = videoUri,
                 onClearPhoto = { photo = null },
@@ -275,11 +313,8 @@ private fun ChatScreen(
 @Composable
 private fun BrandHeader(
     modifier: Modifier = Modifier,
-    verificationMode: String,
-    onModeChange: (String) -> Unit,
 ) {
     var muted by remember { mutableStateOf(false) }
-    var modeMenuExpanded by remember { mutableStateOf(false) }
     Box(modifier.height(56.dp), contentAlignment = Alignment.Center) {
         Image(
             painter = painterResource(R.drawable.xiaozhen_logo),
@@ -293,50 +328,7 @@ private fun BrandHeader(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text("小真", fontSize = 16.sp, color = Ink)
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Row(
-                    Modifier.height(22.dp).clip(RoundedCornerShape(11.dp)).clickable { modeMenuExpanded = true }
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (verificationMode == "quality") "高质量思考" else "快速思考",
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        color = LightMuted,
-                    )
-                    Spacer(Modifier.width(3.dp))
-                    Icon(Lucide.ChevronDown, null, tint = LightMuted, modifier = Modifier.size(13.dp))
-                }
-                DropdownMenu(
-                    expanded = modeMenuExpanded,
-                    onDismissRequest = { modeMenuExpanded = false },
-                    modifier = Modifier.width(238.dp),
-                    shape = RoundedCornerShape(22.dp),
-                    containerColor = Color.White,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 8.dp,
-                ) {
-                    ModeMenuItem(
-                        selected = verificationMode == "speed",
-                        title = "快速思考",
-                        subtitle = "立即回答",
-                        icon = Lucide.AudioLines,
-                    ) {
-                        onModeChange("speed")
-                        modeMenuExpanded = false
-                    }
-                    ModeMenuItem(
-                        selected = verificationMode == "quality",
-                        title = "高质量思考",
-                        subtitle = "分析更充分，回答更优质",
-                        icon = Lucide.Sparkles,
-                    ) {
-                        onModeChange("quality")
-                        modeMenuExpanded = false
-                    }
-                }
-            }
+            Text("事实核验助手", fontSize = 11.sp, color = LightMuted)
         }
         IconButton(
             onClick = { muted = !muted },
@@ -350,31 +342,6 @@ private fun BrandHeader(
             )
         }
     }
-}
-
-@Composable
-private fun ModeMenuItem(
-    selected: Boolean,
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-) {
-    DropdownMenuItem(
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
-                Text(subtitle, color = LightMuted, fontSize = 11.sp, lineHeight = 15.sp)
-            }
-        },
-        onClick = onClick,
-        leadingIcon = { Icon(icon, null, tint = Cocoa, modifier = Modifier.size(19.dp)) },
-        trailingIcon = {
-            if (selected) Icon(Lucide.Check, null, tint = Green, modifier = Modifier.size(18.dp))
-            else Spacer(Modifier.size(18.dp))
-        },
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-    )
 }
 
 @Composable
@@ -430,6 +397,8 @@ private fun StartPrompt(onPick: (String) -> Unit) {
 private fun ChatComposer(
     value: String,
     onValueChange: (String) -> Unit,
+    verificationMode: String,
+    onVerificationModeChange: (String) -> Unit,
     photo: Bitmap?,
     videoUri: Uri?,
     onClearPhoto: () -> Unit,
@@ -444,6 +413,14 @@ private fun ChatComposer(
         modifier = modifier.fillMaxWidth().imePadding()
             .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp),
     ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("核验方式", color = LightMuted, fontSize = 11.sp)
+            Spacer(Modifier.weight(1f))
+            VerificationModeControl(verificationMode, onVerificationModeChange)
+        }
         if (photo != null) {
             Row(
                 Modifier.padding(start = 12.dp, bottom = 8.dp).clip(RoundedCornerShape(16.dp)).background(SurfaceSoft)
@@ -527,11 +504,28 @@ private fun AssistantResultBubble(job: JobEntity) {
     val active = job.status == "queued" || job.status == "running"
     val failed = job.status == "failed" || job.status == "cancelled"
     val visibleElapsed = rememberVisibleElapsed(job)
-    val continuousProgress by animateFloatAsState(
-        targetValue = job.progress.coerceIn(0, 100) / 100f,
-        animationSpec = tween(700),
-        label = "result-progress-${job.jobId}",
-    )
+    if (active) {
+        Row(
+            Modifier.fillMaxWidth().clip(
+                RoundedCornerShape(topStart = 8.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 22.dp),
+            ).background(Color.White).padding(horizontal = 15.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircularProgressIndicator(Modifier.size(17.dp), color = Orange, strokeWidth = 2.dp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                job.displayText,
+                color = Ink,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(formatElapsed(visibleElapsed), color = LightMuted, fontSize = 11.sp)
+        }
+        return
+    }
     Column(
         Modifier.fillMaxWidth().clip(
             RoundedCornerShape(topStart = 8.dp, topEnd = 24.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
@@ -559,9 +553,42 @@ private fun AssistantResultBubble(job: JobEntity) {
         }
 
         SourceDetailsCard(job)
-        ResultSummaryCard(job, active, failed, continuousProgress)
-        ProcessSectionCard(job.jobId, job.progress, active)
-
+        Box(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                .background(if (active) Soft else OrangeSoft).padding(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                Text(
+                    when {
+                        active -> processLabel(job.progress)
+                        failed -> "暂时无法得出结果"
+                        else -> job.verdict ?: "核实完成"
+                    },
+                    color = if (active) Cocoa else Orange,
+                    fontSize = 13.sp,
+                )
+                Text(
+                    job.headline ?: job.sourceText,
+                    color = Ink,
+                    fontSize = 17.sp,
+                    lineHeight = 23.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val summary = if (active) job.displayText else job.conclusion
+                if (!summary.isNullOrBlank()) {
+                    Text(summary, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                }
+                if (!active && !job.sharingAdvice.isNullOrBlank()) {
+                    Text(
+                        "传播建议 · ${job.sharingAdvice}",
+                        color = Cocoa,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+            }
+        }
         if (!active && !failed) {
             HorizontalDivider(color = Divider)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1212,12 +1239,18 @@ private fun SettingsTabIcon(active: Boolean, contentDescription: String) {
 @Composable
 private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
     val active = job.status == "queued" || job.status == "running"
-    val visibleElapsed = rememberVisibleElapsed(job)
+    val listState = rememberLazyListState()
+    rememberFollowLatestListState(
+        state = listState,
+        contentKey = Triple(job.sequence, job.processArtifacts?.length, job.thinkingText?.length),
+        enabled = active,
+    )
     Scaffold(containerColor = Paper) { padding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(22.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -1227,28 +1260,17 @@ private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
                     Text("核实详情", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
                 }
             }
-            item {
-                Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                    Column(Modifier.padding(23.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(job.verdict ?: if (active) "核实进行中" else "核实未完成", color = Orange, fontSize = 13.sp)
-                        Text(job.headline ?: job.sourceText, color = Ink, fontSize = 23.sp, lineHeight = 31.sp)
-                        Text(job.conclusion ?: job.displayText, color = Muted, lineHeight = 21.sp)
-                        HorizontalDivider(color = Divider)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Metric("公开证据", "${job.evidenceCount} 条")
-                            Metric("分析用时", formatElapsed(visibleElapsed))
-                            Metric("流程进度", "${job.progress}%")
-                        }
-                    }
+            if (active) {
+                item { LiveGeneration(job) }
+            } else {
+                item { StructuredReport(job) }
+                job.processArtifacts?.takeIf { it.isNotBlank() }?.let {
+                    item { ProcessHistory(it) }
+                }
+                job.thinkingText?.takeIf { it.isNotBlank() }?.let {
+                    item { DisclosureSection("模型思考过程", it, initiallyExpanded = false) }
                 }
             }
-            job.claimDetails?.let { item { DetailSection("逐主张核验", it) } }
-            job.sharingAdvice?.let { item { DetailSection("传播建议", it) } }
-            job.narrativeAnalysis?.let { item { DetailSection("叙事分析", it) } }
-            job.evidenceGaps?.let { item { DetailSection("待补证据", it) } }
-            job.uncertaintyNote?.let { item { DetailSection("主要不确定性", it) } }
-            job.keyEvidence?.let { item { DetailSection("关键依据", it) } }
-            item { Timeline(job) }
             item {
                 Text(
                     job.aiDisclaimer ?: "AI 辅助核验，仅供信息参考。请结合原始来源与完整语境判断。",
@@ -1275,33 +1297,118 @@ private fun DetailSection(title: String, content: String) {
 }
 
 @Composable
-private fun Timeline(job: JobEntity) {
-    val stages = listOf(
-        "读取链接与内容" to 8,
-        "理解文字与画面" to 22,
-        "提取核心主张" to 42,
-        "整理并编号主张" to 46,
-        "规划核验与检索" to 54,
-        "并发检索公开来源" to 66,
-        "归一化候选证据" to 72,
-        "筛选证据关系" to 81,
-        "综合研判主张" to 90,
-        "生成完整报告" to 100,
+private fun LiveGeneration(job: JobEntity) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text("核验记录", color = Ink, fontWeight = FontWeight.Black, fontSize = 21.sp)
+        Text("公开资料返回后会立即显示，你可以边等待边查看。", color = Muted, fontSize = 12.sp)
+        job.processArtifacts?.takeIf { it.isNotBlank() }?.let {
+            ProcessArtifacts(it, active = true)
+        }
+        when {
+            job.processArtifacts.isNullOrBlank() -> ActiveProcessNode(job.displayText)
+            !job.thinkingText.isNullOrBlank() -> ActiveProcessNode("正在综合研判") {
+                ExpandableText("查看模型思考", job.thinkingText, initiallyExpanded = false)
+            }
+            else -> ActiveProcessNode(job.displayText)
+        }
+    }
+}
+
+@Composable
+private fun ActiveProcessNode(title: String, content: (@Composable () -> Unit)? = null) {
+    val transition = rememberInfiniteTransition(label = "active-node")
+    val nodeAlpha by transition.animateFloat(
+        initialValue = .42f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        label = "active-node-alpha",
     )
-    Card(shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-        Column(Modifier.padding(22.dp)) {
-            Text("核实过程", fontSize = 19.sp, color = Ink)
-            Spacer(Modifier.height(18.dp))
-            stages.forEachIndexed { index, (label, threshold) ->
-                Row(verticalAlignment = Alignment.Top) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(18.dp).clip(CircleShape).background(if (job.progress >= threshold) Orange else Divider))
-                        if (index < stages.lastIndex) Box(Modifier.width(2.dp).height(34.dp).background(if (job.progress >= stages[index + 1].second) Orange else Divider))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(24.dp).padding(top = 5.dp), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.size(11.dp).alpha(nodeAlpha).clip(CircleShape).background(Orange))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            content?.invoke()
+        }
+    }
+}
+
+@Composable
+private fun ProcessHistory(raw: String) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("核验过程", color = Ink, fontWeight = FontWeight.Black, fontSize = 19.sp)
+            ProcessArtifacts(raw, active = false, initiallyExpanded = false)
+        }
+    }
+}
+
+@Composable
+private fun ProcessArtifacts(
+    raw: String,
+    active: Boolean,
+    initiallyExpanded: Boolean = true,
+) {
+    val artifacts = remember(raw) {
+        raw.lineSequence().filter { it.isNotBlank() }.mapNotNull {
+            runCatching { Gson().fromJson(it, JobEventPayloadDto::class.java) }.getOrNull()
+        }.toList()
+    }
+    val uriHandler = LocalUriHandler.current
+    artifacts.forEachIndexed { index, artifact ->
+        var expanded by remember(artifact.kind, artifact.title) { mutableStateOf(initiallyExpanded) }
+        var showAll by remember(artifact.kind, artifact.title) { mutableStateOf(false) }
+        val hasFollowingNode = index < artifacts.lastIndex || active
+        Row(
+            Modifier.fillMaxWidth().drawBehind {
+                if (hasFollowingNode) {
+                    val x = 5.dp.toPx()
+                    drawLine(
+                        Divider,
+                        Offset(x, 13.dp.toPx()),
+                        Offset(x, size.height + 7.dp.toPx()),
+                        1.dp.toPx(),
+                    )
+                }
+            }.padding(bottom = if (hasFollowingNode) 18.dp else 0.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box(Modifier.width(24.dp).padding(top = 5.dp), contentAlignment = Alignment.TopStart) {
+                Box(Modifier.size(11.dp).clip(CircleShape).background(Ink))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(artifact.title ?: "阶段结果", color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        artifact.summary?.let { Text(it, color = Muted, fontSize = 11.sp, lineHeight = 17.sp) }
                     }
-                    Spacer(Modifier.width(14.dp))
-                    Column {
-                        Text(label, color = if (job.progress >= threshold) Ink else Muted)
-                        if (job.progress in threshold until (stages.getOrNull(index + 1)?.second ?: 101)) Text("正在处理…", color = Orange, fontSize = 11.sp)
+                    Icon(
+                        if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+                        if (expanded) "收起" else "展开",
+                        tint = LightMuted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                AnimatedVisibility(expanded) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val allItems = artifact.items.orEmpty()
+                        val visibleItems = if (showAll) allItems else allItems.take(4)
+                        visibleItems.forEach { item -> ArtifactRow(item, uriHandler) }
+                        if (allItems.size > 4) {
+                            Text(
+                                if (showAll) "收起" else "查看全部 ${allItems.size} 项",
+                                color = Cocoa,
+                                fontSize = 11.sp,
+                                modifier = Modifier.clickable { showAll = !showAll }.padding(vertical = 4.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1310,8 +1417,339 @@ private fun Timeline(job: JobEntity) {
 }
 
 @Composable
-private fun Metric(label: String, value: String) {
-    Column { Text(value, color = Ink); Text(label, color = LightMuted, fontSize = 11.sp) }
+private fun ArtifactRow(
+    item: com.mimotrust.xiaozhen.data.remote.JobArtifactItemDto,
+    uriHandler: androidx.compose.ui.platform.UriHandler,
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color.White)
+            .clickable(enabled = !item.url.isNullOrBlank()) {
+                item.url?.let { runCatching { uriHandler.openUri(it) } }
+            }.padding(horizontal = 11.dp, vertical = 9.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            item.label?.let { Text(it, color = Cocoa, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            item.meta?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.width(7.dp))
+                Text(it, color = LightMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (!item.url.isNullOrBlank()) {
+                Spacer(Modifier.width(5.dp))
+                Icon(Lucide.ExternalLink, "打开来源", tint = Muted, modifier = Modifier.size(11.dp))
+            }
+        }
+        item.text?.let { Text(it, color = Muted, fontSize = 12.sp, lineHeight = 18.sp) }
+    }
+}
+
+@Composable
+private fun VerificationModeControl(selected: String, onChange: (String) -> Unit) {
+    Row(Modifier.clip(RoundedCornerShape(10.dp)).background(Soft).padding(3.dp)) {
+        listOf("speed" to "快速", "quality" to "高质量").forEach { (mode, label) ->
+            val active = selected == mode
+            Text(
+                label,
+                color = if (active) Ink else Muted,
+                fontSize = 11.sp,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (active) Color.White else Color.Transparent)
+                    .clickable { onChange(mode) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DisclosureSection(title: String, content: String, initiallyExpanded: Boolean) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            ExpandableText(title, content, initiallyExpanded)
+        }
+    }
+}
+
+@Composable
+private fun ExpandableText(title: String, content: String, initiallyExpanded: Boolean) {
+    var expanded by remember(title) { mutableStateOf(initiallyExpanded) }
+    Row(
+        Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Icon(
+            if (expanded) Lucide.ChevronUp else Lucide.ChevronDown,
+            if (expanded) "收起" else "展开",
+            tint = Muted,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+    AnimatedVisibility(expanded) {
+        Text(
+            content,
+            color = Muted,
+            fontSize = 13.sp,
+            lineHeight = 21.sp,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun StructuredReport(job: JobEntity) {
+    val report = remember(job.reportJson) {
+        job.reportJson?.let {
+            runCatching { Gson().fromJson(it, VerificationDetailsDto::class.java) }.getOrNull()
+        }
+    }
+    if (report == null) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            job.claimDetails?.let { DetailSection("逐主张核验", it) }
+            job.narrativeAnalysis?.let { DetailSection("叙事分析", it) }
+            job.evidenceGaps?.let { DetailSection("待补证据", it) }
+            job.keyEvidence?.let { DetailSection("关键依据", it) }
+        }
+        return
+    }
+    val evidenceById = report.evidenceUsed.orEmpty().associateBy { it.id }
+    Column(verticalArrangement = Arrangement.spacedBy(30.dp)) {
+        ReportHero(job, report)
+        report.narrativeAnalysis?.let { narrative ->
+            Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                ReportSectionTitle(Lucide.MessagesSquare, "叙事分析")
+                Column(
+                    Modifier.fillMaxWidth().drawBehind {
+                        drawLine(Color(0xFF8A6A2D), Offset(1.5.dp.toPx(), 0f), Offset(1.5.dp.toPx(), size.height), 3.dp.toPx())
+                    }.padding(start = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(11.dp),
+                ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("判断", color = LightMuted, fontSize = 10.sp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(narrative.verdict ?: "未单独判断", color = Ink, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                        narrative.explanation?.let { Text(it, color = Muted, fontSize = 13.sp, lineHeight = 22.sp) }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            narrative.methods.orEmpty().take(4).forEach { method ->
+                                Text(
+                                    method,
+                                    color = Color(0xFF765B29),
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.border(1.dp, Color(0xFFDED3BB), RoundedCornerShape(6.dp))
+                                        .background(Color(0xFFF7F2E8), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                }
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ReportSectionTitle(Lucide.ListChecks, "逐项核验")
+            report.claimChecks.orEmpty().forEach { check ->
+                ClaimReportCard(check, evidenceById)
+            }
+        }
+        report.evidenceGaps?.takeIf { it.isNotEmpty() }?.let { gaps ->
+            Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                ReportSectionTitle(Lucide.FileQuestion, "待补证据")
+                gaps.forEachIndexed { index, gap ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        Text("${index + 1}", color = LightMuted, fontSize = 11.sp, modifier = Modifier.width(24.dp))
+                        Text(gap, color = Muted, fontSize = 13.sp, lineHeight = 21.sp, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        report.evidenceUsed?.takeIf { it.isNotEmpty() }?.let { EvidenceSection(it) }
+    }
+}
+
+@Composable
+private fun ReportHero(job: JobEntity, report: VerificationDetailsDto) {
+    val verdict = report.overallVerdict ?: job.verdict ?: "待核实"
+    val tone = verdictToneColor(verdict)
+    val visibleElapsed = rememberVisibleElapsed(job)
+    val selectedCount = report.evidenceSelectedCount.takeIf { it > 0 } ?: job.evidenceCount
+    val reviewedCount = report.evidenceReviewedCount.takeIf { it > 0 } ?: selectedCount
+    Column(
+        Modifier.fillMaxWidth().border(1.dp, Divider, RoundedCornerShape(16.dp))
+            .background(Soft, RoundedCornerShape(16.dp)).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(13.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(46.dp).clip(CircleShape).background(tone.copy(alpha = .10f)), contentAlignment = Alignment.Center) {
+                Icon(verdictIcon(verdict), null, tint = tone, modifier = Modifier.size(23.dp))
+            }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("综合判定", color = LightMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(verdict, color = Ink, fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        report.topic?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Ink, fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(report.conclusion ?: job.conclusion.orEmpty(), color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
+        report.sharingAdvice?.takeIf { it.isNotBlank() }?.let {
+            Row(verticalAlignment = Alignment.Top) {
+                Text("传播建议", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(9.dp))
+                Text(it, color = Muted, fontSize = 12.sp, lineHeight = 19.sp, modifier = Modifier.weight(1f))
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().border(1.dp, Divider, RoundedCornerShape(10.dp))
+                .background(Color.White, RoundedCornerShape(10.dp)),
+        ) {
+            ReportMetric(report.claimChecks.orEmpty().size.toString(), "项主张", Modifier.weight(1f))
+            ReportMetric(reviewedCount.toString(), "条已审阅", Modifier.weight(1f), divider = true)
+            ReportMetric(selectedCount.toString(), "条入选", Modifier.weight(1f), divider = true)
+        }
+        Text("分析用时 ${formatElapsed(visibleElapsed)}", color = LightMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun ReportMetric(value: String, label: String, modifier: Modifier, divider: Boolean = false) {
+    Column(
+        modifier.drawBehind {
+            if (divider) drawLine(Divider, Offset.Zero, Offset(0f, size.height), 1.dp.toPx())
+        }
+            .padding(vertical = 11.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = LightMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun ReportSectionTitle(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = LightMuted, modifier = Modifier.size(19.dp))
+        Spacer(Modifier.width(9.dp))
+        Text(title, color = Ink, fontWeight = FontWeight.Black, fontSize = 21.sp)
+    }
+}
+
+@Composable
+private fun ClaimReportCard(check: ClaimCheckDto, evidenceById: Map<String?, EvidenceDto>) {
+    val verdict = check.verdict ?: "待核实"
+    Column(
+        Modifier.fillMaxWidth().border(1.dp, Divider, RoundedCornerShape(16.dp))
+            .background(Color.White, RoundedCornerShape(16.dp)).padding(17.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(check.claimId ?: "主张", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            check.category?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.width(8.dp))
+                Text(it, color = LightMuted, fontSize = 11.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                verdict,
+                color = verdictToneColor(verdict),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(verdictToneColor(verdict).copy(alpha = .10f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+        check.claim?.let { Text(it, color = Ink, fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold) }
+        check.evidenceSufficiency?.takeIf { it.isNotBlank() }?.let {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("证据充分度", color = LightMuted, fontSize = 10.sp)
+                Spacer(Modifier.width(9.dp))
+                Text(it, color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        check.basis?.let { Text(it, color = Muted, fontSize = 13.sp, lineHeight = 21.sp) }
+        check.uncertainty?.takeIf { it.isNotBlank() }?.let {
+            Row(Modifier.fillMaxWidth().background(Soft).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Text("不确定性", color = Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(9.dp))
+                Text(it, color = Muted, fontSize = 11.sp, lineHeight = 18.sp, modifier = Modifier.weight(1f))
+            }
+        }
+        val sources = check.sourceIds.orEmpty().mapNotNull { evidenceById[it] }
+        if (sources.isEmpty()) {
+            Text("本项没有引用具体证据", color = LightMuted, fontSize = 11.sp)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                sources.forEach { EvidenceLink(it, compact = true) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EvidenceSection(evidence: List<EvidenceDto>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ReportSectionTitle(Lucide.BookOpenCheck, "关键依据")
+        evidence.forEach { EvidenceLink(it, compact = false) }
+    }
+}
+
+@Composable
+private fun EvidenceLink(item: EvidenceDto, compact: Boolean) {
+    val uriHandler = LocalUriHandler.current
+    val modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(if (compact) 8.dp else 14.dp))
+        .background(if (compact) Soft else Color.White)
+        .then(if (compact) Modifier else Modifier.border(1.dp, Divider, RoundedCornerShape(14.dp)))
+        .clickable(enabled = !item.url.isNullOrBlank()) {
+            item.url?.let { runCatching { uriHandler.openUri(it) } }
+        }.padding(horizontal = if (compact) 11.dp else 15.dp, vertical = if (compact) 9.dp else 14.dp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val metadata = listOfNotNull(
+            item.id?.takeIf { it.isNotBlank() },
+            item.author?.takeIf { it.isNotBlank() },
+            item.publishedDate?.takeIf { it.isNotBlank() },
+        )
+        if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), color = LightMuted, fontSize = 10.sp)
+        Row(verticalAlignment = Alignment.Top) {
+            Text(
+                item.title ?: item.url.orEmpty(),
+                color = if (compact) Muted else Ink,
+                fontSize = if (compact) 11.sp else 14.sp,
+                lineHeight = if (compact) 17.sp else 21.sp,
+                fontWeight = if (compact) FontWeight.Normal else FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            if (!item.url.isNullOrBlank()) {
+                Spacer(Modifier.width(7.dp))
+                Icon(Lucide.ExternalLink, "打开来源", tint = Muted, modifier = Modifier.size(14.dp))
+            }
+        }
+        item.relation?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Cocoa, fontSize = 11.sp, lineHeight = 17.sp)
+        }
+        if (!compact) item.snippet?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Muted, fontSize = 12.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+private fun verdictToneColor(verdict: String): Color = when (verdict) {
+    "可信", "大体可信", "属实", "大体属实" -> Color(0xFF3F6C52)
+    "不实", "虚假", "误导" -> Color(0xFF99534C)
+    "真假混合", "部分属实" -> Color(0xFF8A6A2D)
+    else -> Color(0xFF5F6670)
+}
+
+private fun verdictIcon(verdict: String): androidx.compose.ui.graphics.vector.ImageVector = when (verdict) {
+    "可信", "大体可信", "属实", "大体属实" -> Lucide.BadgeCheck
+    "不实", "虚假", "误导" -> Lucide.BadgeX
+    "真假混合", "部分属实" -> Lucide.CircleDotDashed
+    else -> Lucide.CircleHelp
 }
 
 private fun processLabel(progress: Int): String = when (progress) {
@@ -1375,6 +1813,38 @@ private fun formatMessageTime(value: String, offsetMilliseconds: Long = 0): Stri
 private fun formatElapsed(milliseconds: Long): String {
     val seconds = milliseconds / 1000
     return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
+}
+
+@Composable
+private fun rememberFollowLatestListState(
+    state: LazyListState,
+    contentKey: Any?,
+    enabled: Boolean,
+) {
+    var followLatest by remember { mutableStateOf(true) }
+    LaunchedEffect(state) {
+        snapshotFlow {
+            val layout = state.layoutInfo
+            val last = layout.visibleItemsInfo.lastOrNull()
+            val atBottom = layout.totalItemsCount == 0 || (
+                last?.index == layout.totalItemsCount - 1 &&
+                    last.offset + last.size <= layout.viewportEndOffset + 8
+                )
+            state.isScrollInProgress to atBottom
+        }.collectLatest { (scrolling, atBottom) ->
+            when {
+                atBottom -> followLatest = true
+                scrolling -> followLatest = false
+            }
+        }
+    }
+    LaunchedEffect(contentKey, enabled) {
+        if (enabled && followLatest) {
+            delay(40)
+            val lastIndex = state.layoutInfo.totalItemsCount - 1
+            if (lastIndex >= 0) state.animateScrollToItem(lastIndex, 100_000)
+        }
+    }
 }
 
 @Composable
