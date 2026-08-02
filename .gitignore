@@ -3,3 +3,4 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 sandbox/content_gateway/*.log
+sandbox/content_admin_data/

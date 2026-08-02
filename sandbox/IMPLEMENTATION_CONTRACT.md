@@ -34,7 +34,9 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 - Payload 不包含评论正文、联系人、用户稳定标识、Cookie、长期凭据或媒体二进制；
 - 广播为显式、单向、尽力交付，不提供业务 ACK；
 - 守护者、网关或媒体不可用时，沙盒继续浏览和互动；
-- 内容全部由开发者在 OSS 控制台手工上传，项目不提供任何上传能力。
+- 普通用户不具备上传能力；开发者可通过独立的 `content_admin` 管理服务规范化上传，
+  服务端生成并校验 Manifest 1.0 后更新运行时 registry。该管理服务不属于 Android App，
+  不改变 Context、grant 或跨 App 协议。
 
 ## Android 基线
 

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sandbox 内容管理</title>
+  <link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="product">sandbox</p>
+      <h1>内容管理</h1>
+    </div>
+    <div id="connectionState" class="status" data-state="idle">未连接</div>
+  </header>
+
+  <main>
+    <section class="access-band" aria-labelledby="access-title">
+      <div>
+        <h2 id="access-title">管理连接</h2>
+        <p id="storageSummary">阿里云 OSS 配置待读取</p>
+      </div>
+      <label class="token-field">
+        <span>管理员令牌</span>
+        <input id="adminToken" type="password" autocomplete="current-password">
+      </label>
+      <button id="connectButton" type="button">连接</button>
+    </section>
+
+    <div class="workspace">
+      <form id="contentForm" class="editor" novalidate>
+        <section aria-labelledby="type-title">
+          <div class="section-heading">
+            <div>
+              <p class="step">01</p>
+              <h2 id="type-title">内容类型</h2>
+            </div>
+          </div>
+          <div class="type-switch" role="radiogroup" aria-label="内容类型">
+            <label><input type="radio" name="contentType" value="video" checked><span>视频</span></label>
+            <label><input type="radio" name="contentType" value="audio"><span>音频</span></label>
+            <label><input type="radio" name="contentType" value="article"><span>文章</span></label>
+            <label><input type="radio" name="contentType" value="rich_article"><span>图文</span></label>
+            <label><input type="radio" name="contentType" value="image_gallery"><span>图片</span></label>
+          </div>
+        </section>
+
+        <section aria-labelledby="metadata-title">
+          <div class="section-heading">
+            <div>
+              <p class="step">02</p>
+              <h2 id="metadata-title">内容信息</h2>
+            </div>
+          </div>
+          <div class="field-grid">
+            <label><span>内容 ID</span><input id="contentId" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="article-001"></label>
+            <label><span>标题</span><input id="title" required maxlength="200"></label>
+            <label><span>作者</span><input id="author" required maxlength="100"></label>
+            <label><span>发布时间</span><input id="publishedAt" type="datetime-local" required></label>
+            <label class="wide"><span>规范地址</span><input id="canonicalUrl" type="url" required placeholder="https://.../content/article-001"></label>
+          </div>
+        </section>
+
+        <section aria-labelledby="assets-title">
+          <div class="section-heading">
+            <div>
+              <p class="step">03</p>
+              <h2 id="assets-title">内容资源</h2>
+            </div>
+            <div id="blockActions" class="inline-actions" hidden>
+              <button id="addTextBlock" type="button" class="secondary">添加文字</button>
+              <button id="addImageBlock" type="button" class="secondary">添加图片</button>
+            </div>
+          </div>
+
+          <div id="videoFields" class="asset-fields">
+            <label><span>MP4 视频</span><input id="videoMain" type="file" accept="video/mp4"></label>
+            <label><span>封面（可选）</span><input id="videoCover" type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <label><span>字幕（可选）</span><input id="videoSubtitle" type="file" accept="text/vtt,.vtt"></label>
+          </div>
+
+          <div id="audioFields" class="asset-fields" hidden>
+            <label><span>MP3 或 M4A</span><input id="audioMain" type="file" accept="audio/mpeg,audio/mp4,.mp3,.m4a"></label>
+            <label><span>封面（可选）</span><input id="audioCover" type="file" accept="image/png,image/jpeg,image/webp"></label>
+            <label><span>字幕（可选）</span><input id="audioSubtitle" type="file" accept="text/vtt,.vtt"></label>
+          </div>
+
+          <div id="articleFields" class="asset-fields" hidden>
+            <label class="wide"><span>UTF-8 正文</span><textarea id="articleBody" rows="12"></textarea></label>
+            <label><span>封面（可选）</span><input id="articleCover" type="file" accept="image/png,image/jpeg,image/webp"></label>
+          </div>
+
+          <div id="richFields" hidden>
+            <div id="richBlocks" class="ordered-list"></div>
+          </div>
+
+          <div id="galleryFields" hidden>
+            <label class="drop-field"><span>选择一张或多张图片</span><input id="galleryFiles" type="file" multiple accept="image/png,image/jpeg,image/webp"></label>
+            <div id="galleryList" class="ordered-list"></div>
+          </div>
+        </section>
+
+        <section aria-labelledby="metrics-title">
+          <div class="section-heading">
+            <div>
+              <p class="step">04</p>
+              <h2 id="metrics-title">初始互动数量</h2>
+            </div>
+          </div>
+          <div class="metric-grid">
+            <label><span>点赞</span><input id="likeCount" type="number" min="0" value="0"></label>
+            <label><span>评论</span><input id="commentCount" type="number" min="0" value="0"></label>
+            <label><span>转发</span><input id="shareCount" type="number" min="0" value="0"></label>
+          </div>
+        </section>
+
+        <div class="form-actions">
+          <button id="prepareButton" type="submit">上传并生成预览</button>
+          <button id="publishButton" type="button" class="publish" disabled>确认发布</button>
+        </div>
+        <div class="progress-track" aria-hidden="true"><div id="progressBar"></div></div>
+        <p id="operationStatus" class="operation-status" aria-live="polite"></p>
+      </form>
+
+      <aside class="preview" aria-labelledby="preview-title">
+        <div class="section-heading preview-heading">
+          <div>
+            <p class="step">Manifest 1.0</p>
+            <h2 id="preview-title">发布预览</h2>
+          </div>
+          <button id="copyManifest" type="button" class="secondary" disabled>复制 JSON</button>
+        </div>
+        <pre id="manifestPreview">等待内容上传与校验</pre>
+      </aside>
+    </div>
+
+    <section class="catalog" aria-labelledby="catalog-title">
+      <div class="section-heading">
+        <div>
+          <p class="step">Registry 1.0</p>
+          <h2 id="catalog-title">已发布内容</h2>
+        </div>
+        <button id="refreshContents" type="button" class="secondary">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>顺序</th><th>内容 ID</th><th>版本</th><th>类型</th><th>状态</th></tr></thead>
+          <tbody id="contentRows"><tr><td colspan="5">连接后读取</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/admin/app.js" defer></script>
+</body>
+</html>
+

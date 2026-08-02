@@ -15,10 +15,18 @@
 构造和广播调用已经真机验证，Receiver 接收、授权检查、幂等入队、后端提交和报告展示
 仍待守护者侧完成。
 
-当前不建设上传页面、上传 API、自动上传脚本、推荐系统、账号系统或核验逻辑。后期可
-将手工 registry 替换为自动上架数据源，但不得因此修改已经冻结的跨系统合同。
+当前已完成与 Android App 分离的开发者内容管理服务，用于五类内容规范化上传、Manifest
+预览和运行时 registry 发布。普通用户仍无上传入口；推荐、账号和核验逻辑不在沙盒范围内。
+App 通过公开只读 `/v1/feed` 自动读取活动内容；该目录读取不申请 grant、不发送 Context，
+也不修改已经冻结的跨系统合同。
 
 2026-08-02 已批准 Context 2.2 主动请求交互：`comment/share` 只通知候选并让守护者悬浮球提示；用户点击悬浮球后，守护者先向前台沙盒请求当前内容，沙盒才申请新鲜 grant 并响应。该目标合同已写入文档，但当前 APK、Schema、样例和测试尚未迁移，仍为 Context 2.1。
+
+同日已部署独立开发者内容管理服务 `mimotrust-content-admin.service`，监听 ECS
+`127.0.0.1:8788`，通过 SSH 隧道访问。服务端支持五类草稿上传、资源规范化、Manifest
+预览和原子发布。运行时 registry 位于 `/var/lib/mimotrust/content_registry`，当前包含三条
+视频和 `article-001/v1`；公网网关健康检查 `content_count=4`。当前云端配置 APK 已支持
+五类模型和渲染器，启动、前台恢复或手动刷新时获取目录；失败时回退到打包的三条视频。
 
 ## 2. 当前与目标协议
 
@@ -60,8 +68,8 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 |---|---|---|
 | Context 2.1 Schema | 完成 | 5 个合法样例通过，5 个非法样例拒绝 |
 | Manifest 1.0 | 完成 | 3 个活动视频 Manifest 通过校验 |
-| 最小内容网关 | 完成并部署 Debug 环境 | 阿里云 ECS `http://47.94.58.72`，4 个路由，内存 grant，180 秒过期，单次兑换 |
-| Flutter Android App | 完成当前视频阶段 | 三视频竖向 Feed、本地互动和异常降级 |
+| 最小内容网关 | 完成并部署 Debug 环境 | 阿里云 ECS `http://47.94.58.72`，5 个路由，运行时 registry 自动重载，内存 grant，180 秒过期，单次兑换 |
+| Flutter Android App | 完成远程多类型 Feed 阶段 | 远程优先、内置回退；五类模型/渲染器、本地互动和异常降级 |
 | Flutter 到 Kotlin | 完成 | 固定 MethodChannel，单字符串 Payload |
 | Kotlin 显式广播 | 完成 | 固定 Action、目标包和 Extra，32 KB 上限 |
 | Context 2.2 Schema/样例 | 待迁移 | 目标合同已冻结，尚未改代码和合同测试 |
@@ -70,8 +78,8 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 | 守护者 Receiver | 待守护者团队完成 | 当前真机未安装 `com.mimotrust.guardian` |
 | 守护者可靠入队 | 待守护者团队完成 | 需要授权、幂等存储和 WorkManager |
 | 守护者后端 | 待后端团队确认 | 部署地址、认证和负责人尚未提供 |
-| 文章/图文/图片 | 待扩展 | 本地素材存在，尚未加入 App Feed |
-| 音频 | 阻塞于素材 | 不得生成伪造的活动 Manifest |
+| 文章/图文/图片 | 已实现渲染能力 | `article-001/v1` 已进入远程 Feed；富文章和图集等待真实发布内容 |
+| 音频 | 渲染能力完成，素材待提供 | 使用 `just_audio`，不得生成伪造的活动 Manifest |
 
 ## 5. 当前演示内容
 
@@ -80,6 +88,7 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 | `video-001:v1` | SkyNomad 澎程事故传言 | 22.467 秒 | 720×1280 | 1284 / 86 / 214 |
 | `video-002:v1` | 2026年城乡居民基础养老金月最低标准再提高20元 | 19.301 秒 | 720×1280 | 936 / 42 / 118 |
 | `video-003:v1` | 未成年人网络游戏防沉迷新规 | 28.320 秒 | 720×1066 | 2456 / 173 / 367 |
+| `article-001:v1` | 17岁男孩因敌敌畏溅裤子上进了ICU，公共消杀不该成为有毒的“陷阱” | - | 纯文本 | 0 / 0 / 0 |
 
 完整 URL、SHA-256、资源大小和存储信息以以下文件为准：
 
@@ -182,6 +191,7 @@ http://47.94.58.72
 
 ```text
 GET  /health
+GET  /v1/feed
 POST /v1/context-grants
 POST /v1/grants/exchange
 GET  /assets/...
@@ -350,10 +360,10 @@ adb install -r sandbox\mimotrust_controlled_content\build\app\outputs\flutter-ap
 当前构建：
 
 ```text
-大小：188045219 bytes
-SHA-256：8fc845ef522546133106e6a5dd28e6220eb49761582f68d7fa95554345add5c0
+大小：220011733 bytes
+SHA-256：0c6b097a8ce52066a414775d91ebd52d8ff2be85abea8dd80956bb695866355c
 网关配置：http://47.94.58.72
-状态：已在 Xiaomi 25057RA09C 覆盖安装并完成云端回归
+状态：构建完成；当前 ADB 无设备，本次多类型版本尚未完成真机安装
 ```
 
 建议联调日志命令：
@@ -374,9 +384,10 @@ adb reverse --list
 
 ## 13. 当前验收证据
 
-- Dart 静态分析：无问题；
-- Flutter 测试：25/25；
-- 网关测试：10/10；
+- Dart 静态分析：无错误，1 条 `use_super_parameters` 风格提示；
+- Flutter 测试：30/30；
+- 网关测试：13/13；
+- 开发者内容管理服务测试：13/13；
 - 合同校验：5 个合法 Context、5 个非法 Context、3 个活动 Manifest；
 - Xiaomi `25057RA09C`，Android 16 / API 36 真机安装和播放通过；
 - 三条视频竖向切换不发送 Context；
@@ -432,6 +443,7 @@ adb reverse --list
 - `doc/MiMoTrust受控内容沙盒冻结规格.md`；
 - `doc/MiMoTrust受控内容沙盒跨系统协作文档.md`；
 - `doc/MiMoTrust受控内容沙盒首轮交付报告.md`；
+- `doc/MiMoTrust非视频内容后端方案评审确认单.md`；
 - `contracts/content_context.schema.json`；
 - `contracts/content_manifest.schema.json`；
 - `sandbox/IMPLEMENTATION_CONTRACT.md`；

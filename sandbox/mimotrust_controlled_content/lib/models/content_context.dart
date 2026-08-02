@@ -100,7 +100,11 @@ class ContentGrant {
   };
 }
 
-class MediaViewState {
+abstract interface class ContentViewState {
+  Map<String, Object> toJson();
+}
+
+class MediaViewState implements ContentViewState {
   MediaViewState({
     required this.positionMs,
     required this.durationMs,
@@ -118,10 +122,54 @@ class MediaViewState {
   final int durationMs;
   final bool isPlaying;
 
+  @override
   Map<String, Object> toJson() => <String, Object>{
     'position_ms': positionMs,
     'duration_ms': durationMs,
     'is_playing': isPlaying,
+  };
+}
+
+class ReadingViewState implements ContentViewState {
+  ReadingViewState({required this.scrollRatio, required this.blockIndex}) {
+    if (!scrollRatio.isFinite || scrollRatio < 0 || scrollRatio > 1) {
+      throw ArgumentError.value(scrollRatio, 'scrollRatio');
+    }
+    if (blockIndex < 0) {
+      throw ArgumentError.value(blockIndex, 'blockIndex');
+    }
+  }
+
+  final double scrollRatio;
+  final int blockIndex;
+
+  @override
+  Map<String, Object> toJson() => <String, Object>{
+    'scroll_ratio': scrollRatio,
+    'block_index': blockIndex,
+  };
+}
+
+class GalleryViewState implements ContentViewState {
+  GalleryViewState({
+    required this.activeAssetIndex,
+    required this.assetCount,
+  }) {
+    if (assetCount < 1) {
+      throw ArgumentError.value(assetCount, 'assetCount');
+    }
+    if (activeAssetIndex < 0 || activeAssetIndex >= assetCount) {
+      throw ArgumentError.value(activeAssetIndex, 'activeAssetIndex');
+    }
+  }
+
+  final int activeAssetIndex;
+  final int assetCount;
+
+  @override
+  Map<String, Object> toJson() => <String, Object>{
+    'active_asset_index': activeAssetIndex,
+    'asset_count': assetCount,
   };
 }
 
@@ -153,7 +201,7 @@ class ContentContext {
   final String eventId;
   final ContextTrigger trigger;
   final ContentGrant grant;
-  final MediaViewState viewState;
+  final ContentViewState viewState;
   final DateTime observedAt;
 
   Map<String, Object> toJson() => <String, Object>{

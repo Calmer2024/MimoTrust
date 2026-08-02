@@ -16,6 +16,11 @@ video-001
   -> Kotlin 显式广播到 com.mimotrust.guardian
 ```
 
+Android App 还会通过公开只读 `GET /v1/feed` 获取 ECS 运行时 registry，支持
+`video`、`audio`、`article`、`rich_article` 和 `image_gallery` 五类 Manifest 1.0。
+启动、从后台恢复或用户点击刷新按钮时重新获取；网关或远程目录不可用时回退到 APK
+内置的三视频种子。Feed 同步不申请 grant，也不发送 Context。
+
 目录：
 
 - `content_registry/`：首轮静态发布索引、Manifest 和本地封面；
@@ -25,5 +30,7 @@ video-001
 - `IMPLEMENTATION_CONTRACT.md`：已冻结的跨系统技术标识与行为。
 - `DEVICE_VERIFICATION.md`：最新真机发送端验收记录。
 
-本阶段没有上传接口、自动上传脚本或核验逻辑。后期自动上架可以替换静态 registry
-数据源，但应保持 Context 2.1、Manifest 1.0 和 grant 兑换合同不变。
+开发者专用的 `content_admin/` 提供五类内容的规范化上传、Manifest 预览和运行时
+registry 发布；普通用户和 Android App 不具备上传能力。APK 内置数据仅作为远程故障
+回退；管理服务不修改 App。新发布内容由 App 的只读 Feed 自动发现；自动上架保持 Manifest 1.0
+和 grant 兑换合同不变。

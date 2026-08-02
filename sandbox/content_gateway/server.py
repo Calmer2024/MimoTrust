@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
 import mimetypes
@@ -41,15 +42,42 @@ class ContentStore:
     def __init__(self, registry_path: Path):
         self.registry_path = registry_path.resolve()
         self.root = self.registry_path.parent
-        registry = self._read_json(self.registry_path)
+        self._lock = threading.RLock()
+        self._registry_signature = (-1, -1, -1)
+        self._registry_metadata: dict[str, object] = {}
+        self._contents: dict[tuple[str, str], tuple[dict, dict]] = {}
+        self._reload_if_changed(force=True)
+
+    def _reload_if_changed(self, force: bool = False) -> None:
+        try:
+            stat = self.registry_path.stat()
+        except OSError as error:
+            raise ValueError(f"cannot stat content registry: {self.registry_path}") from error
+        signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        if not force and signature == self._registry_signature:
+            return
+        with self._lock:
+            if not force and signature == self._registry_signature:
+                return
+            registry = self._read_json(self.registry_path)
+            contents = self._load_contents(registry)
+            self._contents = contents
+            self._registry_metadata = {
+                "registry_version": registry.get("registry_version"),
+                "provider_id": registry.get("provider_id"),
+                "updated_at": registry.get("updated_at"),
+            }
+            self._registry_signature = signature
+
+    def _load_contents(self, registry: dict) -> dict[tuple[str, str], tuple[dict, dict]]:
         if registry.get("provider_id") != PROVIDER_ID:
             raise ValueError("registry provider_id does not match the fixed contract")
-        self._contents: dict[tuple[str, str], tuple[dict, dict]] = {}
+        contents: dict[tuple[str, str], tuple[dict, dict]] = {}
         for entry in registry.get("contents", []):
             if entry.get("status") != "active":
                 continue
             key = (entry["content_id"], entry["content_version"])
-            if key in self._contents:
+            if key in contents:
                 raise ValueError(f"duplicate active registry entry: {key}")
             manifest_path = (self.root / entry["manifest_path"]).resolve()
             if self.root not in manifest_path.parents:
@@ -60,7 +88,8 @@ class ContentStore:
                 raise ValueError(f"manifest identity mismatch for {key}")
             if manifest.get("provider", {}).get("provider_id") != PROVIDER_ID:
                 raise ValueError(f"manifest provider mismatch for {key}")
-            self._contents[key] = (entry, manifest)
+            contents[key] = (entry, manifest)
+        return contents
 
     @staticmethod
     def _read_json(path: Path) -> dict:
@@ -71,7 +100,9 @@ class ContentStore:
         return value
 
     def get_manifest(self, content_id: str, content_version: str) -> dict:
-        item = self._contents.get((content_id, content_version))
+        self._reload_if_changed()
+        with self._lock:
+            item = self._contents.get((content_id, content_version))
         if item is None:
             raise GatewayError(
                 "CONTENT_UNAVAILABLE",
@@ -80,9 +111,36 @@ class ContentStore:
             )
         return item[1]
 
+    def get_feed(self) -> dict:
+        self._reload_if_changed()
+        with self._lock:
+            items = sorted(
+                self._contents.values(),
+                key=lambda item: item[0].get("display_order", 1 << 30),
+            )
+            return {
+                **self._registry_metadata,
+                "contents": [
+                    {
+                        "content_id": entry["content_id"],
+                        "content_version": entry["content_version"],
+                        "content_type": entry["content_type"],
+                        "display_order": entry.get("display_order", 1 << 30),
+                        "display_metrics": entry.get(
+                            "display_metrics",
+                            {"like_count": 0, "comment_count": 0, "share_count": 0},
+                        ),
+                        "manifest": manifest,
+                    }
+                    for entry, manifest in items
+                ],
+            }
+
     @property
     def content_count(self) -> int:
-        return len(self._contents)
+        self._reload_if_changed()
+        with self._lock:
+            return len(self._contents)
 
     def resolve_asset(self, relative_path: str) -> Path:
         assets_root = (self.root / "assets").resolve()
@@ -258,6 +316,26 @@ def isoformat(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def materialize_manifest(manifest: dict, public_base_url: str) -> dict:
+    result = copy.deepcopy(manifest)
+    for asset in result.get("assets", []):
+        source_url = asset.get("source_url")
+        if not isinstance(source_url, str):
+            continue
+        parsed = urlparse(source_url)
+        if parsed.hostname not in {"127.0.0.1", "localhost"}:
+            continue
+        asset["source_url"] = f"{public_base_url.rstrip('/')}{parsed.path}"
+    return result
+
+
+def materialize_feed(feed: dict, public_base_url: str) -> dict:
+    result = copy.deepcopy(feed)
+    for item in result.get("contents", []):
+        item["manifest"] = materialize_manifest(item["manifest"], public_base_url)
+    return result
+
+
 class GatewayServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -284,6 +362,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     },
                 )
                 return
+            if path == "/v1/feed":
+                feed = self.server.service.store.get_feed()
+                self.send_json(
+                    HTTPStatus.OK,
+                    materialize_feed(feed, self.server.public_base_url),
+                )
+                return
             if path.startswith("/assets/"):
                 self.send_asset(self.server.service.store.resolve_asset(path[len("/assets/") :]))
                 return
@@ -303,7 +388,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.CREATED, response)
                 return
             if path == "/v1/grants/exchange":
-                self.send_json(HTTPStatus.OK, self.server.service.exchange(request))
+                response = self.server.service.exchange(request)
+                response["manifest"] = materialize_manifest(
+                    response["manifest"], self.server.public_base_url
+                )
+                self.send_json(HTTPStatus.OK, response)
                 return
             raise GatewayError("NOT_FOUND", "Route not found.", HTTPStatus.NOT_FOUND)
         except GatewayError as error:
@@ -337,7 +426,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            LOGGER.debug("HTTP asset client disconnected path=%s", path.name)
 
     def send_error_json(self, error: GatewayError) -> None:
         self.send_json(
