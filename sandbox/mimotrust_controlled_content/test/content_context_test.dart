@@ -8,7 +8,7 @@ import 'package:mimotrust_controlled_content/services/context_dispatcher.dart';
 import 'package:mimotrust_controlled_content/services/context_transport.dart';
 
 void main() {
-  test('dispatcher builds the exact video Context 2.1 shape', () async {
+  test('dispatcher builds a deferred Context 2.2 candidate', () async {
     final observedAt = DateTime.utc(2026, 8, 1, 12);
     final content = _videoFixture();
     final reference = _reference(content);
@@ -43,7 +43,7 @@ void main() {
 
     expect(transport.sent, hasLength(1));
     expect(transport.sent.single, same(context));
-    expect(client.requested?.toJson(), client.grant.contentReference.toJson());
+    expect(client.requested, isNull);
     expect(json.keys, <String>[
       'schema_version',
       'event_id',
@@ -55,7 +55,7 @@ void main() {
       'view_state',
       'observed_at',
     ]);
-    expect(json['schema_version'], '2.1');
+    expect(json['schema_version'], '2.2');
     expect(json['trigger'], 'comment');
     expect(json['source_app'], 'mimotrust_controlled_content');
     expect(json['provider'], <String, Object>{
@@ -63,14 +63,7 @@ void main() {
       'application_id': 'com.mimotrust.controlledcontent',
     });
     expect(json['content_ref'], reference.toJson());
-    expect(json['content_access'], <String, Object>{
-      'mode': 'grant_exchange',
-      'exchange_url': 'http://127.0.0.1:8787/v1/grants/exchange',
-      'grant_code': 'one-time-code',
-      'audience': 'mimotrust_guardian_backend',
-      'expires_at': '2026-08-01T12:03:00.000Z',
-      'scopes': <String>['manifest:read', 'asset:read'],
-    });
+    expect(json['content_access'], <String, Object>{'mode': 'deferred_grant'});
     expect(json['view_state'], <String, Object>{
       'position_ms': 3500,
       'duration_ms': 22467,
@@ -84,6 +77,47 @@ void main() {
     expect(encoded, isNot(contains('contact')));
     expect(encoded, isNot(contains('cookie')));
   });
+
+  test(
+    'guardian request reuses request id and obtains a fresh grant',
+    () async {
+      final content = _videoFixture();
+      final observedAt = DateTime.utc(2026, 8, 1, 12);
+      final client = _FakeGrantClient(
+        ContentGrant(
+          grantCode: 'fresh-code',
+          expiresAt: observedAt.add(const Duration(minutes: 3)),
+          audience: 'mimotrust_guardian_backend',
+          scopes: const <String>['manifest:read', 'asset:read'],
+          exchangeUrl: Uri.parse('http://127.0.0.1:8787/v1/grants/exchange'),
+          contentReference: _reference(content),
+        ),
+      );
+      final transport = _RecordingTransport();
+      final dispatcher = ContextDispatcher(client, transport: transport);
+      const requestId = '2ce1c877-0245-4c31-9fd8-a39bd76900d1';
+
+      final context = await dispatcher.dispatchGuardianRequest(
+        requestId: requestId,
+        content: content,
+        viewState: MediaViewState(
+          positionMs: 3500,
+          durationMs: 22467,
+          isPlaying: true,
+        ),
+        observedAt: observedAt,
+      );
+
+      expect(context.eventId, requestId);
+      expect(context.trigger, ContextTrigger.guardianRequest);
+      expect(client.requested?.toJson(), _reference(content).toJson());
+      expect(
+        context.toJson()['content_access'],
+        containsPair('mode', 'grant_exchange'),
+      );
+      expect(transport.sent.single, same(context));
+    },
+  );
 
   test('share uses the same dispatcher and a distinct event id', () async {
     final content = _videoFixture();

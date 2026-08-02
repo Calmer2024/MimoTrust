@@ -11,9 +11,13 @@ video-001
   -> 下载 OSS 视频并校验 SHA-256
   -> 拒绝重复兑换
   -> Flutter 播放和本地互动
-  -> comment/share 申请 grant 并生成 Context 2.1
+  -> comment/share 生成 deferred_grant 候选 Context 2.2
   -> MethodChannel
   -> Kotlin 显式广播到 com.mimotrust.guardian
+  -> 用户点击 MimoTrust 悬浮球
+  -> guardian 显式请求当前前台视频
+  -> 沙盒签发一次性 grant 并返回 guardian_request Context 2.2
+  -> guardian 兑换 Manifest、校验视频资产并创建核验任务
 ```
 
 目录：
@@ -26,4 +30,4 @@ video-001
 - `DEVICE_VERIFICATION.md`：最新真机发送端验收记录。
 
 本阶段没有上传接口、自动上传脚本或核验逻辑。后期自动上架可以替换静态 registry
-数据源，但应保持 Context 2.1、Manifest 1.0 和 grant 兑换合同不变。
+数据源，但应保持 Context 2.2、Manifest 1.0 和 grant 兑换合同不变。

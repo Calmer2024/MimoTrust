@@ -14,7 +14,11 @@ class MimoTrustApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val database = Room.databaseBuilder(this, MimoDatabase::class.java, "mimo-trust.db")
-            .addMigrations(MimoDatabase.MIGRATION_1_2, MimoDatabase.MIGRATION_2_3)
+            .addMigrations(
+                MimoDatabase.MIGRATION_1_2,
+                MimoDatabase.MIGRATION_2_3,
+                MimoDatabase.MIGRATION_3_4,
+            )
             .build()
         val notifier = VerificationNotifier(this)
         notifier.createChannel()

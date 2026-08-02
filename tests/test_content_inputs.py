@@ -1,5 +1,5 @@
 from app.content import extract_article
-from app.main import app
+from app.main import _is_direct_video_url, app
 from app.security import resolve_content_input, validate_video_url
 from fastapi.testclient import TestClient
 
@@ -31,6 +31,12 @@ def test_article_input_accepts_public_non_platform_host(monkeypatch) -> None:
     )
 
     assert resolve_content_input("文章 https://news.example/story") == "https://news.example/story"
+
+
+def test_authorized_direct_video_asset_is_not_classified_as_article() -> None:
+    assert _is_direct_video_url("https://cdn.example/video/demo.mp4?token=short-lived")
+    assert _is_direct_video_url("https://cdn.example/live/index.m3u8")
+    assert not _is_direct_video_url("https://news.example/story.html")
 
 
 def test_new_platform_hosts_are_allowed(monkeypatch) -> None:

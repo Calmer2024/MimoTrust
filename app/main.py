@@ -44,6 +44,18 @@ app = FastAPI(
     version="0.6.0",
     docs_url="/api/docs",
 )
+
+
+DIRECT_VIDEO_SUFFIXES = {
+    ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".flv", ".m3u8",
+}
+
+
+def _is_direct_video_url(url: str) -> bool:
+    """Identify an authorized public media asset without treating it as HTML."""
+    return Path(urlparse(url).path).suffix.lower() in DIRECT_VIDEO_SUFFIXES
+
+
 cache = ResultCache(settings.cache_ttl_seconds)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -298,14 +310,19 @@ async def _execute_analysis(
             hostname == suffix or hostname.endswith(f".{suffix}")
             for suffix in ALLOWED_HOST_SUFFIXES
         )
-        if request.input_kind == "article" or not is_platform:
+        is_direct_video = _is_direct_video_url(url)
+        if request.input_kind == "article" or (
+            not is_platform and not is_direct_video
+        ):
             result = await analyze_article_url(url)
         else:
             try:
                 result = await analyze(url, request.mode)
             except PipelineError:
-                if request.input_kind == "platform" or hostname.endswith(
-                    ("kuaishou.com", "gifshow.com")
+                if (
+                    request.input_kind == "platform"
+                    or is_direct_video
+                    or hostname.endswith(("kuaishou.com", "gifshow.com"))
                 ):
                     raise
                 result = await analyze_article_url(url)

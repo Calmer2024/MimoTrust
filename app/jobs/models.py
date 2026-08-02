@@ -47,6 +47,7 @@ class JobEvent(BaseModel):
     display_text: str
     elapsed_ms: int = 0
     progress_hint: int = Field(ge=0, le=100)
+    content_metadata: dict[str, Any] | None = None
     occurred_at: datetime = Field(default_factory=utc_now)
 
 

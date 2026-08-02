@@ -130,7 +130,10 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
         assert field in repository
         assert field in entity
         assert f"job.{field}" in ui
-    assert "version = 3" in database
+    assert "version = 4" in database
     assert "MIGRATION_1_2" in database
     assert "MIGRATION_2_3" in database
-    assert "MimoDatabase.MIGRATION_1_2, MimoDatabase.MIGRATION_2_3" in application
+    assert "MIGRATION_3_4" in database
+    assert "extractedMetadata" in database
+    for migration in ("MIGRATION_1_2", "MIGRATION_2_3", "MIGRATION_3_4"):
+        assert f"MimoDatabase.{migration}" in application

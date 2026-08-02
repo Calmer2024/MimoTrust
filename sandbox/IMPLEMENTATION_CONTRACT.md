@@ -1,9 +1,8 @@
 # MiMoTrust 受控内容沙盒实施合同
 
-> 状态：已冻结  
+> 状态：Context 2.2 已实现并完成真机端到端验收
 > 日期：2026-08-02
-> 当前实现依据：《MiMoTrust 受控内容沙盒跨系统协作文档》Context 2.1
-> 目标合同：Context 2.2 已批准，当前代码、Schema、样例和 APK 尚未迁移
+> 当前实现依据：《MiMoTrust 受控内容沙盒跨系统协作文档》Context 2.2
 
 ## 固定标识
 
@@ -14,7 +13,7 @@
 | MethodChannel | `com.mimotrust.controlledcontent/context` |
 | Broadcast Action | `com.mimotrust.intent.action.CONTENT_CONTEXT` |
 | Intent Extra | `payload` |
-| Context Schema | `2.1` |
+| Context Schema | `2.2` |
 | Manifest Schema | `1.0` |
 | Provider ID | `mimotrust_sandbox` |
 | Audience | `mimotrust_guardian_backend` |
@@ -50,9 +49,9 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 - 音频素材尚未提供，注册表中只能标为 `pending_asset`，不得生成伪造的有效 Manifest；
 - 原始素材不移动、不覆盖，沙盒只保存用于固定演示快照的副本。
 
-## 已批准目标合同：Context 2.2（未实现）
+## Context 2.2 主动请求合同（已实现）
 
-本节描述下一阶段实现目标，不代表当前 APK 已具备这些行为。在 2.2 迁移完成并通过合同测试、Flutter 测试和真机验收前，上文“固定标识”和“固定行为”仍准确描述当前 2.1 代码。
+本节描述当前实现。Debug 联调暂不启用 signature 权限；正式签名统一后必须恢复权限保护。
 
 | 项目 | 目标值 |
 |---|---|

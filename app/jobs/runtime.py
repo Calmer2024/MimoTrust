@@ -77,6 +77,7 @@ class JobRuntime:
         if not current:
             raise KeyError(job_id)
         sequence = current.sequence + 1
+        content_metadata = changes.pop("content_metadata", None)
         elapsed_ms = changes.pop("elapsed_ms", current.elapsed_ms)
         status = changes.pop("status", current.status)
         updated = await self.store.update(
@@ -98,6 +99,7 @@ class JobRuntime:
             display_text=display_text,
             elapsed_ms=elapsed_ms,
             progress_hint=progress_hint,
+            content_metadata=content_metadata,
         ))
         return updated
 

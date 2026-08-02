@@ -31,6 +31,19 @@ data class JobEventDto(
     @SerializedName("display_text") val displayText: String,
     @SerializedName("elapsed_ms") val elapsedMs: Long,
     @SerializedName("progress_hint") val progressHint: Int,
+    @SerializedName("content_metadata") val contentMetadata: ContentMetadataDto? = null,
+)
+
+data class ContentMetadataDto(
+    val title: String? = null,
+    val platform: String? = null,
+    val uploader: String? = null,
+    @SerializedName("duration_seconds") val durationSeconds: Double? = null,
+    @SerializedName("content_type") val contentType: String? = null,
+    val strategy: String? = null,
+    val topic: String? = null,
+    @SerializedName("claim_count") val claimCount: Int? = null,
+    @SerializedName("transcript_chars") val transcriptChars: Int? = null,
 )
 
 data class MobileCardDto(
@@ -79,7 +92,18 @@ data class VerificationDetailsDto(
     @SerializedName("report_markdown") val reportMarkdown: String? = null,
 )
 
-data class AnalysisDto(val verification: VerificationDetailsDto? = null)
+data class StructuredInformationDto(
+    val topic: String? = null,
+    val claims: List<Map<String, Any?>>? = null,
+)
+
+data class AnalysisDto(
+    val verification: VerificationDetailsDto? = null,
+    val metadata: ContentMetadataDto? = null,
+    val strategy: String? = null,
+    @SerializedName("structured_data") val structuredData: StructuredInformationDto? = null,
+    @SerializedName("transcript_chars") val transcriptChars: Int? = null,
+)
 
 data class JobResultDto(
     val card: MobileCardDto,

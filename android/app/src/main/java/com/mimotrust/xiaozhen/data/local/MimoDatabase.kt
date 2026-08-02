@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [JobEntity::class], version = 3, exportSchema = false)
+@Database(entities = [JobEntity::class], version = 4, exportSchema = false)
 abstract class MimoDatabase : RoomDatabase() {
     abstract fun jobs(): JobDao
 
@@ -25,6 +25,12 @@ abstract class MimoDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE verification_jobs ADD COLUMN uncertaintyNote TEXT")
                 database.execSQL("ALTER TABLE verification_jobs ADD COLUMN reportUrl TEXT")
                 database.execSQL("ALTER TABLE verification_jobs ADD COLUMN aiDisclaimer TEXT")
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE verification_jobs ADD COLUMN extractedMetadata TEXT")
             }
         }
     }

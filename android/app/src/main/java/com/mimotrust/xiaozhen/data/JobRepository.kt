@@ -5,6 +5,7 @@ import com.mimotrust.xiaozhen.BuildConfig
 import com.mimotrust.xiaozhen.data.local.JobDao
 import com.mimotrust.xiaozhen.data.local.JobEntity
 import com.mimotrust.xiaozhen.data.remote.CreateJobRequestDto
+import com.mimotrust.xiaozhen.data.remote.ContentMetadataDto
 import com.mimotrust.xiaozhen.data.remote.JobEventDto
 import com.mimotrust.xiaozhen.data.remote.JobSourceDto
 import com.mimotrust.xiaozhen.data.remote.MimoApi
@@ -113,6 +114,9 @@ class JobRepository(
                             progress = event.progressHint,
                             sequence = event.sequence,
                             elapsedMs = event.elapsedMs,
+                            extractedMetadata = event.contentMetadata
+                                ?.let(::formatContentMetadata)
+                                ?: old.extractedMetadata,
                         )
                         dao.upsert(updated)
                         notifier.showProgress(updated)
@@ -138,7 +142,8 @@ class JobRepository(
     private suspend fun loadResult(jobId: String) {
         val response = api.result(jobId)
         val result = response.card
-        val details = response.analysis?.verification
+        val analysis = response.analysis
+        val details = analysis?.verification
         val old = dao.get(jobId) ?: return
         val completed = old.copy(
             status = "completed",
@@ -151,6 +156,15 @@ class JobRepository(
             uncertaintyNote = result.uncertaintyNote?.trim()?.takeIf { it.isNotEmpty() },
             reportUrl = result.reportUrl,
             aiDisclaimer = result.aiDisclaimer,
+            extractedMetadata = analysis?.metadata?.let { metadata ->
+                formatContentMetadata(
+                    metadata = metadata,
+                    strategy = analysis.strategy,
+                    topic = analysis.structuredData?.topic,
+                    claimCount = analysis.structuredData?.claims?.size,
+                    transcriptChars = analysis.transcriptChars,
+                )
+            } ?: old.extractedMetadata,
             claimDetails = details?.claimChecks
                 ?.mapNotNull { item ->
                     val claim = item.claim?.trim().orEmpty()
@@ -205,4 +219,37 @@ class JobRepository(
 
     private fun containsHttpUrl(text: String): Boolean =
         Regex("https?://\\S+", RegexOption.IGNORE_CASE).containsMatchIn(text)
+
+    private fun formatContentMetadata(
+        metadata: ContentMetadataDto,
+        strategy: String? = metadata.strategy,
+        topic: String? = metadata.topic,
+        claimCount: Int? = metadata.claimCount,
+        transcriptChars: Int? = metadata.transcriptChars,
+    ): String? {
+        val lines = buildList {
+            metadata.title?.trim()?.takeIf { it.isNotEmpty() }?.let { add("标题｜$it") }
+            metadata.platform?.trim()?.takeIf { it.isNotEmpty() }?.let { add("平台｜$it") }
+            metadata.uploader?.trim()?.takeIf { it.isNotEmpty() }?.let { add("发布者｜$it") }
+            metadata.durationSeconds?.takeIf { it > 0 }?.let { seconds ->
+                val totalSeconds = seconds.toInt()
+                add("时长｜%d:%02d".format(totalSeconds / 60, totalSeconds % 60))
+            }
+            topic?.trim()?.takeIf { it.isNotEmpty() }?.let { add("主题｜$it") }
+            claimCount?.let { add("主张｜已提取 $it 条") }
+            transcriptChars?.takeIf { it > 0 }?.let { add("文本｜${it} 字") }
+            strategy?.trim()?.takeIf { it.isNotEmpty() }?.let { value ->
+                val label = when (value) {
+                    "subtitle" -> "字幕"
+                    "asr" -> "语音识别"
+                    "visual" -> "画面理解"
+                    "hybrid" -> "多模态"
+                    "metadata" -> "元信息"
+                    else -> value
+                }
+                add("提取方式｜$label")
+            }
+        }
+        return lines.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }
 }

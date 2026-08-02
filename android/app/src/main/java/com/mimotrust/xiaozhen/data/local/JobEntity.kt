@@ -26,5 +26,6 @@ data class JobEntity(
     val uncertaintyNote: String? = null,
     val reportUrl: String? = null,
     val aiDisclaimer: String? = null,
+    val extractedMetadata: String? = null,
 )
 

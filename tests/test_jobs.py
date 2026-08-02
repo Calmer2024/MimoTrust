@@ -48,6 +48,38 @@ def test_memory_runtime_is_idempotent_and_orders_events() -> None:
     asyncio.run(scenario())
 
 
+def test_job_event_carries_extracted_content_metadata() -> None:
+    async def scenario() -> None:
+        runtime = JobRuntime("memory")
+        await runtime.store.create(JobView(
+            job_id="job-metadata",
+            device_id="device-one",
+            client_request_id="request-meta-1",
+            source=JobSource(value="https://example.com/video"),
+        ))
+        metadata = {
+            "title": "示例视频",
+            "platform": "哔哩哔哩",
+            "duration_seconds": 92.4,
+            "topic": "公共事件",
+            "claim_count": 3,
+        }
+
+        await runtime.emit(
+            "job-metadata",
+            "claim_structuring",
+            "running",
+            "已识别 3 条待核验主张",
+            42,
+            content_metadata=metadata,
+        )
+
+        event = (await runtime.events.read("job-metadata", 0, timeout=0.01))[0]
+        assert event.content_metadata == metadata
+
+    asyncio.run(scenario())
+
+
 def test_mobile_card_uses_neutral_user_copy() -> None:
     result = SimpleNamespace(
         verification={

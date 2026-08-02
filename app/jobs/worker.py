@@ -108,7 +108,19 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
         await runtime.emit(
             job_id, "claim_structuring", "running",
             f"已识别 {len(result.structured_data.claims)} 条待核验主张",
-            42, elapsed_ms=elapsed(),
+            42,
+            elapsed_ms=elapsed(),
+            content_metadata={
+                "title": result.metadata.title,
+                "platform": result.metadata.platform,
+                "uploader": result.metadata.uploader,
+                "duration_seconds": result.metadata.duration_seconds,
+                "content_type": result.metadata.content_type,
+                "strategy": result.strategy,
+                "topic": result.structured_data.topic,
+                "claim_count": len(result.structured_data.claims),
+                "transcript_chars": result.transcript_chars,
+            },
         )
 
         async def on_stage(stage: str) -> None:

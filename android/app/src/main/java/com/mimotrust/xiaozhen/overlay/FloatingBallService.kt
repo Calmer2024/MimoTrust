@@ -34,7 +34,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import java.util.UUID
 import kotlin.math.abs
 
 enum class FloatingBallState {
@@ -58,7 +57,10 @@ class FloatingBallService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_ATTENTION) ballView?.setState(FloatingBallState.Attention, 0)
+        when (intent?.action) {
+            ACTION_ATTENTION -> ballView?.setState(FloatingBallState.Attention, 0)
+            ACTION_FAILED -> ballView?.setState(FloatingBallState.Failed, 0)
+        }
         return START_STICKY
     }
 
@@ -102,21 +104,14 @@ class FloatingBallService : Service() {
             openApp(activeJobId)
             return
         }
-        val video = CurrentVideoContextStore(this).current()
-        if (video == null) {
-            ballView?.setState(FloatingBallState.Attention, 0)
-            Toast.makeText(this, "还没有当前视频链接，请先从视频平台分享给小真", Toast.LENGTH_LONG).show()
-            return
-        }
-        ballView?.setState(FloatingBallState.Queued, 2)
-        scope.launch {
-            runCatching {
-                (application as MimoTrustApplication).repository.createSharedJob(video.url, UUID.randomUUID().toString())
-            }.onSuccess { activeJobId = it }
-                .onFailure {
-                    ballView?.post { ballView?.setState(FloatingBallState.Failed, 0) }
-                }
-        }
+        val requestId = ControlledContentRequestCoordinator.request(this)
+        ballView?.setState(FloatingBallState.Attention, 0)
+        ballView?.postDelayed({
+            if (ControlledContentRequestCoordinator.isPending(this, requestId)) {
+                ballView?.setState(FloatingBallState.Failed, 0)
+                Toast.makeText(this, "未获取到当前视频，请保持临时视频平台在前台后重试", Toast.LENGTH_LONG).show()
+            }
+        }, ControlledContentRequestCoordinator.RESPONSE_TIMEOUT_MS)
     }
 
     private fun observeJobs() {
@@ -125,8 +120,12 @@ class FloatingBallService : Service() {
                 val tracked = activeJobId?.let { id -> jobs.firstOrNull { it.jobId == id } }
                     ?: jobs.firstOrNull { it.status == "queued" || it.status == "running" }
                 if (tracked != null) {
+                    val isNewJob = tracked.jobId != activeJobId
                     activeJobId = tracked.jobId
-                    ballView?.post { ballView?.setState(mapState(tracked), tracked.progress) }
+                    ballView?.post {
+                        if (isNewJob) ballView?.setState(FloatingBallState.Idle, 0)
+                        ballView?.setState(mapState(tracked), tracked.progress)
+                    }
                     if (tracked.status !in setOf("queued", "running")) {
                         ballView?.postDelayed({ activeJobId = null }, 4_000)
                     }
@@ -215,6 +214,7 @@ class FloatingBallService : Service() {
 
     companion object {
         const val ACTION_ATTENTION = "com.mimotrust.xiaozhen.action.FLOATING_BALL_ATTENTION"
+        const val ACTION_FAILED = "com.mimotrust.xiaozhen.action.FLOATING_BALL_FAILED"
         private const val CHANNEL_ID = "mimo_floating_ball"
         private const val NOTIFICATION_ID = 9101
     }
@@ -224,15 +224,29 @@ private class FloatingBallView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ringRect = RectF()
     private val clipPath = Path()
-    private val logo: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.xiaozhen_logo)
+    private val logo: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.xiaozhen_floating_ball)
     var state: FloatingBallState = FloatingBallState.Idle
         private set
-    private var progress: Int = 0
-    private var animator: ValueAnimator? = null
+    private var displayedProgress = 0f
+    private var attentionAnimator: ValueAnimator? = null
+    private var progressAnimator: ValueAnimator? = null
 
     fun setState(value: FloatingBallState, progressValue: Int) {
         state = value
-        progress = progressValue.coerceIn(0, 100)
+        val targetProgress = progressValue.coerceIn(0, 100).toFloat()
+        if (value in setOf(
+                FloatingBallState.Queued,
+                FloatingBallState.Resolving,
+                FloatingBallState.Searching,
+                FloatingBallState.Finishing,
+                FloatingBallState.Completed,
+            )
+        ) {
+            animateProgressTo(if (value == FloatingBallState.Completed) 100f else targetProgress)
+        } else {
+            progressAnimator?.cancel()
+            displayedProgress = 0f
+        }
         if (value == FloatingBallState.Attention) startAttentionAnimation() else stopAnimation()
         invalidate()
         if (value == FloatingBallState.Completed || value == FloatingBallState.Failed) {
@@ -273,16 +287,32 @@ private class FloatingBallView(context: Context) : View(context) {
         paint.color = ringColor
         val sweep = when (state) {
             FloatingBallState.Idle -> 0f
-            FloatingBallState.Attention, FloatingBallState.Completed, FloatingBallState.Failed -> 360f
-            FloatingBallState.Queued -> 24f
-            else -> 360f * progress.coerceAtLeast(6) / 100f
+            FloatingBallState.Attention, FloatingBallState.Failed -> 360f
+            else -> 360f * displayedProgress / 100f
         }
         canvas.drawArc(ringRect, -90f, sweep, false, paint)
     }
 
+    private fun animateProgressTo(target: Float) {
+        if (target <= displayedProgress || kotlin.math.abs(target - displayedProgress) < .1f) {
+            displayedProgress = maxOf(displayedProgress, target)
+            invalidate()
+            return
+        }
+        progressAnimator?.cancel()
+        progressAnimator = ValueAnimator.ofFloat(displayedProgress, target).apply {
+            duration = 650L
+            addUpdateListener {
+                displayedProgress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
+
     private fun startAttentionAnimation() {
-        if (animator?.isRunning == true) return
-        animator = ValueAnimator.ofFloat(1f, .38f, 1f).apply {
+        if (attentionAnimator?.isRunning == true) return
+        attentionAnimator = ValueAnimator.ofFloat(1f, .38f, 1f).apply {
             duration = 820
             repeatCount = ValueAnimator.INFINITE
             addUpdateListener { alpha = it.animatedValue as Float }
@@ -291,8 +321,8 @@ private class FloatingBallView(context: Context) : View(context) {
     }
 
     fun stopAnimation() {
-        animator?.cancel()
-        animator = null
+        attentionAnimator?.cancel()
+        attentionAnimator = null
         alpha = 1f
     }
 

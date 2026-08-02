@@ -8,6 +8,11 @@ import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -27,7 +32,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,12 +44,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -52,10 +60,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -85,11 +95,13 @@ import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.net.URI
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.roundToInt
 
 private enum class MainTab { Chat, History, Settings }
 
@@ -114,6 +126,9 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
         val jobs by viewModel.jobs.collectAsStateWithLifecycle()
         var selectedTab by remember { mutableStateOf(if (initialJobId == null) MainTab.Chat else MainTab.History) }
         var selectedId by remember { mutableStateOf(initialJobId) }
+        val chatListState = rememberLazyListState()
+        val historyListState = rememberLazyListState()
+        val settingsListState = rememberLazyListState()
         val selected = jobs.firstOrNull { it.jobId == selectedId }
 
         if (selected != null) {
@@ -130,14 +145,19 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
                     jobs = jobs,
                     onVerify = viewModel::verify,
                     onOpen = { selectedId = it.jobId },
+                    listState = chatListState,
                     modifier = Modifier.padding(scaffoldPadding),
                 )
                 MainTab.History -> HistoryScreen(
                     jobs = jobs,
                     onOpen = { selectedId = it.jobId },
+                    listState = historyListState,
                     modifier = Modifier.padding(scaffoldPadding),
                 )
-                MainTab.Settings -> SettingsScreen(Modifier.padding(scaffoldPadding))
+                MainTab.Settings -> SettingsScreen(
+                    listState = settingsListState,
+                    modifier = Modifier.padding(scaffoldPadding),
+                )
             }
         }
     }
@@ -148,12 +168,16 @@ private fun ChatScreen(
     jobs: List<JobEntity>,
     onVerify: (String, String) -> Unit,
     onOpen: (JobEntity) -> Unit,
+    listState: LazyListState,
     modifier: Modifier = Modifier,
 ) {
     var input by remember { mutableStateOf("") }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     var verificationMode by remember { mutableStateOf("speed") }
     var videoUri by remember { mutableStateOf<Uri?>(null) }
+    var waitingForNewMessage by remember { mutableStateOf(false) }
+    var newestJobBeforeSend by remember { mutableStateOf<String?>(null) }
+    val visibleJobs = jobs.take(3).reversed()
     val context = LocalContext.current
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -168,6 +192,8 @@ private fun ChatScreen(
     }
     val send = {
         if (input.isNotBlank()) {
+            newestJobBeforeSend = jobs.firstOrNull()?.jobId
+            waitingForNewMessage = true
             onVerify(input.trim(), verificationMode)
             input = ""
             photo = null
@@ -175,70 +201,75 @@ private fun ChatScreen(
         }
     }
 
+    LaunchedEffect(jobs.firstOrNull()?.jobId, waitingForNewMessage) {
+        val newestJobId = jobs.firstOrNull()?.jobId
+        if (waitingForNewMessage && newestJobId != null && newestJobId != newestJobBeforeSend) {
+            // 欢迎卡占据索引 0，新消息从索引 1 开始。
+            listState.animateScrollToItem(visibleJobs.size)
+            waitingForNewMessage = false
+        }
+    }
+
     Box(modifier.fillMaxSize().background(Paper)) {
         LazyColumn(
+            state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 22.dp, top = 82.dp, end = 22.dp, bottom = 90.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Hi，今天想核实什么？", fontSize = 29.sp, lineHeight = 36.sp, fontWeight = FontWeight.Black, color = Ink)
-                    Text("发来链接或告诉我你看到的内容", fontSize = 14.sp, color = Muted)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = verificationMode == "speed",
-                            onClick = { verificationMode = "speed" },
-                            label = { Text("快速") },
-                        )
-                        FilterChip(
-                            selected = verificationMode == "quality",
-                            onClick = { verificationMode = "quality" },
-                            label = { Text("高质量") },
-                        )
-                    }
-                }
-            }
+            item { WelcomeHeroCard() }
             if (jobs.isEmpty()) {
                 item { StartPrompt { input = it } }
             } else {
-                items(jobs.take(3).reversed(), key = { it.jobId }) {
+                items(visibleJobs, key = { it.jobId }) {
                     ConversationTurn(it, onOpen)
                 }
             }
         }
 
         BrandHeader(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth().background(Paper)
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(3f).background(Paper)
                 .padding(start = 22.dp, top = 8.dp, end = 22.dp, bottom = 6.dp),
+            verificationMode = verificationMode,
+            onModeChange = { verificationMode = it },
         )
 
-        ChatComposer(
-            value = input,
-            onValueChange = { input = it },
-            photo = photo,
-            videoUri = videoUri,
-            onClearPhoto = { photo = null },
-            onClearVideo = { videoUri = null },
-            onCamera = { cameraLauncher.launch(null) },
-            onPickVideo = { videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
-            onVoice = {
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.SIMPLIFIED_CHINESE.toLanguageTag())
-                    putExtra(RecognizerIntent.EXTRA_PROMPT, "请说出需要核实的内容")
-                }
-                runCatching { speechLauncher.launch(intent) }
-            },
-            onSend = send,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().zIndex(2f),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            ChatComposer(
+                value = input,
+                onValueChange = { input = it },
+                photo = photo,
+                videoUri = videoUri,
+                onClearPhoto = { photo = null },
+                onClearVideo = { videoUri = null },
+                onCamera = { cameraLauncher.launch(null) },
+                onPickVideo = { videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) },
+                onVoice = {
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.SIMPLIFIED_CHINESE.toLanguageTag())
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, "请说出需要核实的内容")
+                    }
+                    runCatching { speechLauncher.launch(intent) }
+                },
+                onSend = send,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
 @Composable
-private fun BrandHeader(modifier: Modifier = Modifier) {
+private fun BrandHeader(
+    modifier: Modifier = Modifier,
+    verificationMode: String,
+    onModeChange: (String) -> Unit,
+) {
     var muted by remember { mutableStateOf(false) }
+    var modeMenuExpanded by remember { mutableStateOf(false) }
     Box(modifier.height(56.dp), contentAlignment = Alignment.Center) {
         Image(
             painter = painterResource(R.drawable.xiaozhen_logo),
@@ -246,9 +277,54 @@ private fun BrandHeader(modifier: Modifier = Modifier) {
             modifier = Modifier.align(Alignment.CenterStart).size(44.dp).clip(AppIconContinuousCorner),
             contentScale = ContentScale.Crop,
         )
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(
+            Modifier.align(Alignment.Center).width(238.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(1.dp),
+        ) {
             Text("小真", fontSize = 16.sp, color = Ink)
-            Text("MimoTrust 的专业核验助手", fontSize = 11.sp, color = LightMuted)
+            Box(
+                Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(12.dp)).clickable { modeMenuExpanded = true }
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(if (verificationMode == "quality") "高质量思考" else "快速思考", fontSize = 11.sp, color = LightMuted)
+                    Spacer(Modifier.width(2.dp))
+                    Icon(Lucide.ChevronDown, null, tint = LightMuted, modifier = Modifier.size(12.dp))
+                }
+                DropdownMenu(
+                    expanded = modeMenuExpanded,
+                    onDismissRequest = { modeMenuExpanded = false },
+                    modifier = Modifier.width(238.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    containerColor = Color.White,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 8.dp,
+                ) {
+                    ModeMenuItem(
+                        selected = verificationMode == "speed",
+                        title = "快速思考",
+                        subtitle = "立即回答",
+                        icon = Lucide.AudioLines,
+                    ) {
+                        onModeChange("speed")
+                        modeMenuExpanded = false
+                    }
+                    ModeMenuItem(
+                        selected = verificationMode == "quality",
+                        title = "高质量思考",
+                        subtitle = "分析更充分，回答更优质",
+                        icon = Lucide.Sparkles,
+                    ) {
+                        onModeChange("quality")
+                        modeMenuExpanded = false
+                    }
+                }
+            }
         }
         IconButton(
             onClick = { muted = !muted },
@@ -261,6 +337,50 @@ private fun BrandHeader(modifier: Modifier = Modifier) {
                 modifier = Modifier.size(21.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun ModeMenuItem(
+    selected: Boolean,
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(title, color = Ink, fontSize = 14.sp)
+                Text(subtitle, color = LightMuted, fontSize = 11.sp)
+            }
+        },
+        onClick = onClick,
+        leadingIcon = {
+            if (selected) Icon(Lucide.Check, null, tint = Cocoa, modifier = Modifier.size(18.dp))
+            else Spacer(Modifier.size(18.dp))
+        },
+        trailingIcon = { Icon(icon, null, tint = Cocoa, modifier = Modifier.size(19.dp)) },
+    )
+}
+
+@Composable
+private fun WelcomeHeroCard() {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color.White)
+            .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.xiaozhen_hero),
+            contentDescription = "小真欢迎插画",
+            modifier = Modifier.fillMaxWidth().height(230.dp).clip(RoundedCornerShape(22.dp)),
+            contentScale = ContentScale.Fit,
+        )
+        Spacer(Modifier.height(14.dp))
+        Text("Hi，今天想核实什么？", color = Ink, fontSize = 23.sp, lineHeight = 30.sp)
+        Spacer(Modifier.height(5.dp))
+        Text("发来链接或告诉我你看到的内容", color = LightMuted, fontSize = 13.sp)
     }
 }
 
@@ -394,6 +514,11 @@ private fun AssistantResultBubble(job: JobEntity) {
     val active = job.status == "queued" || job.status == "running"
     val failed = job.status == "failed" || job.status == "cancelled"
     val visibleElapsed = rememberVisibleElapsed(job)
+    val continuousProgress by animateFloatAsState(
+        targetValue = job.progress.coerceIn(0, 100) / 100f,
+        animationSpec = tween(700),
+        label = "result-progress-${job.jobId}",
+    )
     Column(
         Modifier.fillMaxWidth().clip(
             RoundedCornerShape(topStart = 8.dp, topEnd = 24.dp, bottomStart = 24.dp, bottomEnd = 24.dp),
@@ -419,6 +544,8 @@ private fun AssistantResultBubble(job: JobEntity) {
             Spacer(Modifier.weight(1f))
             Text(formatElapsed(visibleElapsed), color = LightMuted, fontSize = 11.sp)
         }
+
+        SourceDetailsCard(job)
 
         Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
@@ -456,18 +583,18 @@ private fun AssistantResultBubble(job: JobEntity) {
                 }
                 if (active) {
                     LinearProgressIndicator(
-                        progress = { job.progress.coerceIn(0, 100) / 100f },
+                        progress = { continuousProgress },
                         modifier = Modifier.fillMaxWidth().padding(top = 3.dp).height(4.dp).clip(CircleShape),
                         color = Orange,
                         trackColor = Divider,
                     )
-                    Text("${job.progress}%", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
+                    Text("${(continuousProgress * 100).roundToInt()}%", color = Muted, fontSize = 11.sp, modifier = Modifier.align(Alignment.End))
                 }
             }
         }
 
         Text("处理过程", color = Muted, fontSize = 12.sp)
-        InlineProcess(job.progress)
+        InlineProcess(job.jobId, job.progress, active)
 
         if (!active && !failed) {
             HorizontalDivider(color = Divider)
@@ -480,7 +607,84 @@ private fun AssistantResultBubble(job: JobEntity) {
 }
 
 @Composable
-private fun InlineProcess(progress: Int) {
+private fun SourceDetailsCard(job: JobEntity, compact: Boolean = false) {
+    val metadata = job.extractedMetadata?.lineSequence()
+        ?.mapNotNull { line ->
+            val parts = line.split('｜', limit = 2)
+            if (parts.size == 2 && parts[1].isNotBlank()) parts[0] to parts[1] else null
+        }
+        ?.toMap()
+        .orEmpty()
+    val source = remember(job.sourceText) { sourcePresentation(job.sourceText) }
+    val title = metadata["标题"] ?: source.detail
+    val platform = metadata["平台"] ?: source.label
+    val topic = metadata["主题"]
+    val iconSize = if (compact) 32.dp else 36.dp
+    val sectionRadius = if (compact) 15.dp else 18.dp
+
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(sectionRadius)).background(SurfaceSoft)
+            .padding(horizontal = 14.dp, vertical = if (compact) 11.dp else 13.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 9.dp else 11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(iconSize).clip(RoundedCornerShape(11.dp)).background(OrangeSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (source.isVideo) Lucide.Video else Lucide.Link,
+                    contentDescription = null,
+                    tint = Orange,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("信源详情", color = Ink, fontSize = 12.sp, lineHeight = 16.sp)
+                Text(
+                    platform,
+                    color = Muted,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Text(
+            title,
+            color = Ink,
+            fontSize = if (compact) 13.sp else 14.sp,
+            lineHeight = if (compact) 18.sp else 20.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        topic?.let {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(OrangeSoft)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Lucide.Hash, contentDescription = null, tint = Orange, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    it,
+                    color = Cocoa,
+                    fontSize = 11.sp,
+                    lineHeight = 17.sp,
+                    maxLines = if (compact) 1 else 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlineProcess(jobId: String, progress: Int, isRunning: Boolean) {
     val stages = listOf(
         "读取内容" to 8,
         "理解文字与画面" to 22,
@@ -492,26 +696,49 @@ private fun InlineProcess(progress: Int) {
         "综合研判" to 90,
         "生成完整报告" to 100,
     )
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val targetCount = stages.count { progress >= it.second }
+    // 初次进入视图时直接采用当前真实阶段；只有任务仍在运行且收到后续事件时才增量展开。
+    var revealedCount by remember(jobId) { mutableStateOf(targetCount) }
+    LaunchedEffect(jobId, targetCount, isRunning) {
+        if (!isRunning) {
+            revealedCount = targetCount
+        } else {
+            while (revealedCount < targetCount) {
+                revealedCount += 1
+                delay(120)
+            }
+        }
+    }
+
+    Column {
         stages.forEachIndexed { index, (label, threshold) ->
-            val completed = progress >= threshold
-            val previousThreshold = stages.getOrNull(index - 1)?.second ?: 0
-            val current = !completed && progress >= previousThreshold
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(8.dp).clip(CircleShape).background(
-                        when {
-                            completed && !current -> Green
-                            current -> Orange
-                            else -> Divider
-                        },
-                    ),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(label, color = if (completed) Ink else LightMuted, fontSize = 13.sp)
-                if (current && progress < 100) {
-                    Spacer(Modifier.weight(1f))
-                    Text("进行中", color = Orange, fontSize = 11.sp)
+            val current = isRunning && index == targetCount - 1
+            val completed = index < targetCount && !current
+            AnimatedVisibility(
+                visible = index < revealedCount,
+                enter = fadeIn(tween(180)) + expandVertically(animationSpec = tween(220), expandFrom = Alignment.Top),
+            ) {
+                Row(Modifier.height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.width(12.dp).height(30.dp)) {
+                        val centerX = size.width / 2f
+                        val centerY = size.height / 2f
+                        if (index > 0) drawLine(Green, Offset(centerX, 0f), Offset(centerX, centerY), strokeWidth = 1.dp.toPx())
+                        if (index + 1 < revealedCount) {
+                            drawLine(
+                                if (completed) Green else Divider,
+                                Offset(centerX, centerY),
+                                Offset(centerX, size.height),
+                                strokeWidth = 1.dp.toPx(),
+                            )
+                        }
+                        drawCircle(if (completed) Green else Orange, radius = 4.dp.toPx(), center = Offset(centerX, centerY))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(label, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+                    if (current && progress < 100) {
+                        Spacer(Modifier.weight(1f))
+                        Text("进行中", color = Orange, fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -523,6 +750,11 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
     val active = job.status == "queued" || job.status == "running"
     val failed = job.status == "failed" || job.status == "cancelled"
     val visibleElapsed = rememberVisibleElapsed(job)
+    val continuousProgress by animateFloatAsState(
+        targetValue = job.progress.coerceIn(0, 100) / 100f,
+        animationSpec = tween(700),
+        label = "history-progress-${job.jobId}",
+    )
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onOpen(job) },
         shape = RoundedCornerShape(24.dp),
@@ -557,6 +789,7 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
                 }
                 Text(formatElapsed(visibleElapsed), color = Muted, fontSize = 11.sp)
             }
+            SourceDetailsCard(job, compact = true)
             Text(
                 job.headline ?: job.sourceText,
                 color = Ink,
@@ -566,14 +799,14 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
             )
             if (active) {
                 LinearProgressIndicator(
-                    progress = { job.progress.coerceIn(0, 100) / 100f },
+                    progress = { continuousProgress },
                     modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
                     color = Orange,
                     trackColor = Divider,
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(processLabel(job.progress), color = Muted, fontSize = 12.sp)
-                    Text("${job.progress}%", color = Muted, fontSize = 12.sp)
+                    Text("${(continuousProgress * 100).roundToInt()}%", color = Muted, fontSize = 12.sp)
                 }
             } else if (!job.conclusion.isNullOrBlank()) {
                 Text(job.conclusion, color = Muted, fontSize = 13.sp, lineHeight = 19.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -583,9 +816,30 @@ private fun JobCard(job: JobEntity, onOpen: (JobEntity) -> Unit) {
 }
 
 @Composable
-private fun HistoryScreen(jobs: List<JobEntity>, onOpen: (JobEntity) -> Unit, modifier: Modifier = Modifier) {
+private fun HistoryScreen(
+    jobs: List<JobEntity>,
+    onOpen: (JobEntity) -> Unit,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val filteredJobs = remember(jobs, query) {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) jobs else jobs.filter { job ->
+            listOfNotNull(
+                job.sourceText,
+                job.headline,
+                job.conclusion,
+                job.verdict,
+                job.displayText,
+                job.extractedMetadata,
+                sourcePresentation(job.sourceText).label,
+            ).any { it.contains(keyword, ignoreCase = true) }
+        }
+    }
     LazyColumn(
-        modifier.fillMaxSize().background(Paper),
+        state = listState,
+        modifier = modifier.fillMaxSize().background(Paper),
         contentPadding = PaddingValues(22.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -594,8 +848,53 @@ private fun HistoryScreen(jobs: List<JobEntity>, onOpen: (JobEntity) -> Unit, mo
                 Text("核实记录", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
             }
         }
-        if (jobs.isEmpty()) item { EmptyHistory() }
-        items(jobs, key = { it.jobId }) { JobCard(it, onOpen) }
+        item {
+            Row(
+                Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(23.dp))
+                    .background(Color.White).padding(horizontal = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Lucide.Search, contentDescription = null, tint = LightMuted, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(9.dp))
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = TextStyle(color = Ink, fontSize = 14.sp),
+                    cursorBrush = SolidColor(Cocoa),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) Text("搜索标题、来源或核实内容", color = LightMuted, fontSize = 13.sp)
+                            innerTextField()
+                        }
+                    },
+                )
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(32.dp)) {
+                        Icon(Lucide.X, contentDescription = "清除搜索", tint = Muted, modifier = Modifier.size(17.dp))
+                    }
+                }
+            }
+        }
+        when {
+            jobs.isEmpty() -> item { EmptyHistory() }
+            filteredJobs.isEmpty() -> item { EmptySearchResult(query) }
+            else -> items(filteredJobs, key = { it.jobId }) { JobCard(it, onOpen) }
+        }
+    }
+}
+
+@Composable
+private fun EmptySearchResult(query: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Lucide.SearchX, contentDescription = null, tint = LightMuted, modifier = Modifier.size(30.dp))
+        Spacer(Modifier.height(12.dp))
+        Text("没有找到相关记录", color = Ink)
+        Text("试试其他关键词 · $query", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -615,7 +914,7 @@ private fun EmptyHistory() {
 }
 
 @Composable
-private fun SettingsScreen(modifier: Modifier = Modifier) {
+private fun SettingsScreen(listState: LazyListState, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var notifications by remember { mutableStateOf(true) }
     var darkMode by remember { mutableStateOf(false) }
@@ -625,7 +924,8 @@ private fun SettingsScreen(modifier: Modifier = Modifier) {
         if (floatingBall) FloatingBallManager.enable(context)
     }
     LazyColumn(
-        modifier.fillMaxSize().background(Paper),
+        state = listState,
+        modifier = modifier.fillMaxSize().background(Paper),
         contentPadding = PaddingValues(22.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -964,12 +1264,50 @@ private fun processLabel(progress: Int): String = when (progress) {
     else -> "正在生成完整报告"
 }
 
+private data class SourcePresentation(
+    val label: String,
+    val detail: String,
+    val isVideo: Boolean,
+)
+
+private fun sourcePresentation(value: String): SourcePresentation {
+    val normalized = value.trim()
+    val lower = normalized.lowercase(Locale.ROOT)
+    val recognizedVideo = "douyin.com" in lower || "iesdouyin.com" in lower ||
+        "bilibili.com" in lower || "b23.tv" in lower ||
+        "xiaohongshu.com" in lower || "xhslink.com" in lower ||
+        "kuaishou.com" in lower || "weibo.com" in lower || "weibo.cn" in lower ||
+        lower.startsWith("content://") || lower.endsWith(".mp4") ||
+        lower.endsWith(".mov") || lower.endsWith(".m4v")
+    val platform = when {
+        "douyin.com" in lower || "iesdouyin.com" in lower -> "抖音视频"
+        "bilibili.com" in lower || "b23.tv" in lower -> "哔哩哔哩视频"
+        "xiaohongshu.com" in lower || "xhslink.com" in lower -> "小红书视频"
+        "kuaishou.com" in lower -> "快手视频"
+        "weibo.com" in lower || "weibo.cn" in lower -> "微博视频"
+        lower.startsWith("content://") -> "相册视频"
+        lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".m4v") -> "本地视频"
+        lower.startsWith("http://") || lower.startsWith("https://") -> "网页来源"
+        else -> "用户提供的核实内容"
+    }
+    val detail = when {
+        lower.startsWith("content://") -> "已从设备相册选择"
+        lower.startsWith("http://") || lower.startsWith("https://") -> runCatching {
+            URI(normalized).host?.removePrefix("www.")
+        }.getOrNull().takeUnless { it.isNullOrBlank() } ?: normalized
+        else -> normalized.replace('\n', ' ').take(52).ifBlank { "等待读取来源信息" }
+    }
+    return SourcePresentation(platform, detail, recognizedVideo)
+}
+
+private val ChinaZoneId: ZoneId = ZoneId.of("Asia/Shanghai")
+
 private fun formatCreatedAt(value: String): String = runCatching {
-    Instant.parse(value).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("MM月dd日 HH:mm"))
+    Instant.parse(value).atZone(ChinaZoneId).format(DateTimeFormatter.ofPattern("MM月dd日 HH:mm"))
 }.getOrDefault("最近核实")
 
 private fun formatMessageTime(value: String, offsetMilliseconds: Long = 0): String = runCatching {
-    Instant.parse(value).plusMillis(offsetMilliseconds).atZone(ZoneId.systemDefault())
+    Instant.parse(value).plusMillis(offsetMilliseconds).atZone(ChinaZoneId)
         .format(DateTimeFormatter.ofPattern("HH:mm"))
 }.getOrDefault("")
 

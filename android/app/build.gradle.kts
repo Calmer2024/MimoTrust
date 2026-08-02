@@ -10,7 +10,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.mimotrust.xiaozhen"
+        applicationId = "com.mimotrust.guardian"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

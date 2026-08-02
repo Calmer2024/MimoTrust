@@ -86,3 +86,34 @@ Receiver 安装后进行，不得改投 `com.mimotrust.xiaozhen`。
 
 本次只验证当前 Context 2.1 沙盒发送端改用云端网关。Context 2.2 主动请求和正式守护者
 Receiver 仍未实施。公网入口目前是 Debug 明文 HTTP，正式演示前必须迁移到 HTTPS 域名。
+
+## Context 2.2 跨 App 完整链路验收（2026-08-02）
+
+- 正式守护者包 `com.mimotrust.guardian` 与 sandbox 包
+  `com.mimotrust.controlledcontent` 已同时安装在 Xiaomi `25057RA09C`；
+- 用户点击小真悬浮球后，sandbox 只在当前视频页处于前台时响应主动请求；
+- 请求与响应使用同一个 UUID：
+  `69e88d2c-d3fa-4a43-910b-35e1bf7fd942`；
+- sandbox 返回 `type=video`、`trigger=guardian_request` 的 Context 2.2 Payload；
+- Guardian 校验 Payload 后向云端网关兑换一次性 grant，`POST /v1/grants/exchange`
+  返回 `200 OK`；
+- Guardian 校验 Manifest 的内容版本、分析资产和 SHA-256 后，向本地真实后端创建任务
+  `97735559-3923-4e7d-8add-d1455bb1503c`；
+- 后端识别授权后的 OSS `.mp4` 为视频直链，完成下载、标准化、完整音频 ASR、结构化转换和
+  核验结果输出；
+- 任务最终状态 `completed`，耗时 `8257 ms`，策略 `asr`，语音覆盖率 `100%`；
+- 本样例没有提取到需要外部事实核验的现实世界主张，因此最终结论为“待核实 / 仍需更多可靠来源”，
+  不是链路失败。
+
+关键日志按顺序为：
+
+```text
+MiMoTrustSandbox: CONTENT_CONTEXT_REQUEST request_id=69e88d2c-d3fa-4a43-910b-35e1bf7fd942
+MiMoTrustSandbox: CONTENT_CONTEXT_SEND event_id=69e88d2c-d3fa-4a43-910b-35e1bf7fd942 type=video trigger=guardian_request
+MiMoTrustGuardian: GUARDIAN_CONTEXT_ACCEPTED event_id=69e88d2c-d3fa-4a43-910b-35e1bf7fd942 content_id=video-001
+MiMoTrustGuardian: VERIFICATION_JOB_CREATED event_id=69e88d2c-d3fa-4a43-910b-35e1bf7fd942 job_id=97735559-3923-4e7d-8add-d1455bb1503c
+```
+
+Context 2.1 章节中的“尚未完成”是当时发送端单测的历史记录；以上 Context 2.2 验收已经补齐
+Receiver、主动请求、授权兑换、任务入队、流式事件与最终结果读取。公网 Debug 网关仍为明文 HTTP，
+发布前迁移 HTTPS 的限制不变。

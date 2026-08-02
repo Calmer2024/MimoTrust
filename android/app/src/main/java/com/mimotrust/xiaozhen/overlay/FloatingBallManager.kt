@@ -42,4 +42,12 @@ object FloatingBallManager {
             Intent(context, FloatingBallService::class.java).setAction(FloatingBallService.ACTION_ATTENTION),
         )
     }
+
+    fun failed(context: Context) {
+        if (!isEnabled(context) || !canDraw(context)) return
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, FloatingBallService::class.java).setAction(FloatingBallService.ACTION_FAILED),
+        )
+    }
 }

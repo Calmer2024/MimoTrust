@@ -93,13 +93,13 @@ def validate_context(value: dict, source: str) -> None:
         "content_ref", "content_access", "view_state", "observed_at",
     }
     exact_keys(value, required, set(), source)
-    if value["schema_version"] != "2.1":
+    if value["schema_version"] != "2.2":
         raise ContractError(f"{source}.schema_version: unsupported")
     try:
         uuid.UUID(nonempty_string(value["event_id"], f"{source}.event_id"))
     except ValueError as error:
         raise ContractError(f"{source}.event_id: invalid UUID") from error
-    if value["trigger"] not in {"comment", "share"}:
+    if value["trigger"] not in {"comment", "share", "guardian_request"}:
         raise ContractError(f"{source}.trigger: unsupported")
     if value["source_app"] != "mimotrust_controlled_content":
         raise ContractError(f"{source}.source_app: mismatch")
@@ -140,8 +140,12 @@ def validate_context(value: dict, source: str) -> None:
         {"exchange_url", "grant_code", "audience", "expires_at", "scopes"},
         f"{source}.content_access",
     )
-    if access["mode"] not in {"grant_exchange", "public_manifest", "content_uri"}:
+    if access["mode"] not in {"deferred_grant", "grant_exchange", "public_manifest", "content_uri"}:
         raise ContractError(f"{source}.content_access.mode: unsupported")
+    if value["trigger"] in {"comment", "share"} and access != {"mode": "deferred_grant"}:
+        raise ContractError(f"{source}.content_access: candidate must be deferred")
+    if value["trigger"] == "guardian_request" and access["mode"] != "grant_exchange":
+        raise ContractError(f"{source}.content_access: guardian request requires grant")
     observed_at = parse_datetime(value["observed_at"], f"{source}.observed_at")
     if access["mode"] == "grant_exchange":
         required_access = {"exchange_url", "grant_code", "audience", "expires_at", "scopes"}
