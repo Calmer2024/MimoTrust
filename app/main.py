@@ -270,6 +270,7 @@ async def _execute_analysis(
                         cached_result.structured_data,
                         request.verification_mode,
                         source_url=cached_result.metadata.webpage_url,
+                        source_context=cached_result.full_source_text,
                         progress=progress,
                         stream=stream,
                         product=product,
@@ -345,6 +346,7 @@ async def _execute_analysis(
                 result.structured_data,
                 request.verification_mode,
                 source_url=result.metadata.webpage_url,
+                source_context=result.full_source_text,
                 progress=progress,
                 stream=stream,
                 product=product,
@@ -469,6 +471,7 @@ async def _execute_uploaded_analysis(
                 result.structured_data,
                 verification_mode,
                 source_url=result.metadata.webpage_url,
+                source_context=result.full_source_text,
                 progress=progress,
                 stream=stream,
                 product=product,
@@ -568,14 +571,25 @@ async def analyze_uploaded_content_stream(
 @app.post("/api/verify")
 async def verify_claims(request: VerifyRequest) -> dict[str, object]:
     try:
-        result = await verify_structured_information(
-            request.structured_data,
-            request.verification_mode,
-        )
+        source_context = None
+        source_url = None
+        cached: dict[str, object] | None = None
         if request.cache_key:
             cached = cache.get(request.cache_key)
             if not cached:
                 raise HTTPException(status_code=404, detail="缓存记录不存在或已过期")
+            source_context = str(cached.get("full_source_text") or "")
+            metadata = cached.get("metadata")
+            if isinstance(metadata, dict):
+                source_url = str(metadata.get("webpage_url") or "") or None
+        result = await verify_structured_information(
+            request.structured_data,
+            request.verification_mode,
+            source_url=source_url,
+            source_context=source_context,
+        )
+        if request.cache_key:
+            assert cached is not None
             cached_structured = StructuredInformation.model_validate(
                 cached.get("structured_data", {})
             )

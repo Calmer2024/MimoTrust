@@ -22,6 +22,10 @@ STAGE_DETAILS = {
 }
 
 
+def stream_event_kind(kind: str) -> str:
+    return "thinking_delta" if kind.endswith("thinking") else "report_delta"
+
+
 class JobCancelled(Exception):
     pass
 
@@ -66,8 +70,12 @@ def build_mobile_card(job_id: str, result: AnalyzeResponse, completed_at: dateti
 
 async def process_job(runtime: JobRuntime, job_id: str) -> None:
     started = time.perf_counter()
-    stream_buffers = {"thinking": "", "report": ""}
-    last_stream_emit = {"thinking": started, "report": started}
+    stream_buffers = {
+        "m2_thinking": "",
+        "thinking": "",
+        "report": "",
+    }
+    last_stream_emit = {kind: started for kind in stream_buffers}
 
     def elapsed() -> int:
         return round((time.perf_counter() - started) * 1000)
@@ -86,19 +94,26 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             return
         stream_buffers[kind] = ""
         last_stream_emit[kind] = now
+        stage, display_text, progress = {
+            "m2_thinking": ("evidence_retrieval", "正在制定检索与核验计划", 54),
+            "thinking": ("report_generating", "正在形成最终核验报告", 90),
+            "report": ("report_generating", "正在形成最终核验报告", 90),
+        }[kind]
         await runtime.emit(
             job_id,
-            "report_generating",
+            stage,
             "running",
-            "正在形成最终核验报告",
-            90,
+            display_text,
+            progress,
             elapsed_ms=elapsed(),
-            event_kind=f"{kind}_delta",
+            event_kind=stream_event_kind(kind),
             payload={"text": text},
         )
 
     async def on_stream(kind: str, text: str) -> None:
-        if kind not in stream_buffers or not text:
+        if not text:
+            return
+        if kind not in stream_buffers:
             return
         stream_buffers[kind] += text
         await flush_stream(kind, force="\n" in text)
@@ -184,8 +199,8 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             if mapped:
                 retrying = stage.startswith("M6 输出未完成")
                 if retrying:
-                    stream_buffers["thinking"] = ""
-                    stream_buffers["report"] = ""
+                    for kind in stream_buffers:
+                        stream_buffers[kind] = ""
                 await runtime.emit(
                     job_id,
                     mapped[0],
@@ -201,12 +216,13 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
             result.structured_data,
             job.verification_mode,
             source_url=result.metadata.webpage_url,
+            source_context=result.full_source_text,
             progress=on_stage,
             stream=on_stream,
             product=on_product,
         )
-        await flush_stream("thinking", force=True)
-        await flush_stream("report", force=True)
+        for kind in stream_buffers:
+            await flush_stream(kind, force=True)
         result.full_pipeline_milliseconds = max(result.full_pipeline_milliseconds, elapsed())
         completed_at = utc_now()
         card = build_mobile_card(job_id, result, completed_at)

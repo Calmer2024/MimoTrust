@@ -5,9 +5,20 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MonotonicEventGateTest {
+
+    @Test
+    fun permanentMissingJobResponseStopsEventStreamRetries() {
+        assertTrue(isTerminalEventStreamResponse(404))
+        assertTrue(isTerminalEventStreamResponse(410))
+        assertFalse(isTerminalEventStreamResponse(500))
+        assertFalse(isTerminalEventStreamResponse(null))
+    }
+
     @Test
     fun concurrentEventsCannotRegressTheStoredSequence() = runTest {
         val gate = MonotonicEventGate()

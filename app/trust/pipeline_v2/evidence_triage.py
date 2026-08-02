@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 from urllib.parse import urlsplit
 
 from .config import env_float, env_int
@@ -21,10 +21,12 @@ from .workspace import CaseRunWorkspace
 
 
 TRIAGE_PROTOCOL_VERSION = "1"
-TRIAGE_PROMPT_VERSION = "m5-v2"
+TRIAGE_PROMPT_VERSION = "m5-v3"
 DEFAULT_TRIAGE_MODEL = "mimo-v2.5-pro"
 DEFAULT_TRIAGE_TIMEOUT_SECONDS = 45.0
 DEFAULT_TRIAGE_MAX_COMPLETION_TOKENS = 750
+DEFAULT_QUALITY_TRIAGE_TIMEOUT_SECONDS = 120.0
+DEFAULT_QUALITY_TRIAGE_MAX_COMPLETION_TOKENS = 12_000
 DEFAULT_TARGET_BATCH_CHARACTERS = 24_000
 DEFAULT_MAX_BATCHES = 4
 
@@ -146,7 +148,11 @@ def build_triage_request(
         "MIMO_TRIAGE_QUALITY_MAX_COMPLETION_TOKENS"
         if thinking == "enabled"
         else "MIMO_TRIAGE_SPEED_MAX_COMPLETION_TOKENS",
-        max(3000, legacy_max_tokens) if thinking == "enabled" else legacy_max_tokens,
+        (
+            max(DEFAULT_QUALITY_TRIAGE_MAX_COMPLETION_TOKENS, legacy_max_tokens)
+            if thinking == "enabled"
+            else legacy_max_tokens
+        ),
     )
     claim_items = [
         {key: item.get(key) for key in ("编号", "文本", "表达")}
@@ -163,6 +169,7 @@ def build_triage_request(
     user_input = {
         "案例编号": claims["案例编号"],
         "主题": claims["主题"],
+        "原始上下文": claims.get("原始上下文", ""),
         "主张": claim_items,
         "核验项": verification_items,
         "全部证据索引": global_index,
@@ -204,6 +211,7 @@ async def execute_triage_batches(
     *,
     model: str = DEFAULT_TRIAGE_MODEL,
     thinking: str = "disabled",
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> list[TriageBatchOutcome]:
     """Run all batches concurrently; invalid batches fail open to full evidence."""
 
@@ -218,6 +226,7 @@ async def execute_triage_batches(
                     model_client,
                     model,
                     thinking,
+                    stream_callback,
                 )
                 for batch in batches
             )
@@ -266,6 +275,7 @@ async def run_m5_case(
     model_client: JsonCompletionModel | None = None,
     triage_model: str = DEFAULT_TRIAGE_MODEL,
     thinking: str = "disabled",
+    stream_callback: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> tuple[CaseRunWorkspace, dict[str, Any]]:
     """Run standalone evidence triage and persist its formal M5 interface."""
 
@@ -323,11 +333,7 @@ async def run_m5_case(
             resolved_client = MimoSynthesisModel(
                 api_key=os.environ.get("MIMO_API_KEY", ""),
                 base_url=os.environ.get("MIMO_BASE_URL", DEFAULT_BASE_URL),
-                timeout_seconds=env_float(
-                    "MIMO_TRIAGE_TIMEOUT_SECONDS",
-                    DEFAULT_TRIAGE_TIMEOUT_SECONDS,
-                    minimum=0.1,
-                ),
+                timeout_seconds=_triage_timeout_seconds(thinking),
             )
         else:
             resolved_client = model_client
@@ -339,6 +345,7 @@ async def run_m5_case(
             resolved_client,
             model=triage_model,
             thinking=thinking,
+            stream_callback=stream_callback,
         )
         for outcome in outcomes:
             batch_root = f"{attempt_root}/batches/{outcome.batch.batch_id}"
@@ -426,6 +433,7 @@ async def _execute_one_batch(
     model_client: JsonCompletionModel,
     model: str,
     thinking: str,
+    stream_callback: Callable[[str, str], Awaitable[None]] | None,
 ) -> TriageBatchOutcome:
     request = build_triage_request(
         claims,
@@ -440,13 +448,20 @@ async def _execute_one_batch(
     error: str | None = None
     status = "成功"
     try:
+        async def stream_delta(kind: str, text: str) -> None:
+            if stream_callback is not None and kind == "thinking":
+                await stream_callback(batch.batch_id, text)
+
+        operation = (
+            model_client.complete_stream(request, stream_delta)
+            if stream_callback is not None
+            and thinking == "enabled"
+            and hasattr(model_client, "complete_stream")
+            else model_client.complete(request)
+        )
         completion = await asyncio.wait_for(
-            model_client.complete(request),
-            timeout=env_float(
-                "MIMO_TRIAGE_TIMEOUT_SECONDS",
-                DEFAULT_TRIAGE_TIMEOUT_SECONDS,
-                minimum=0.1,
-            ),
+            operation,
+            timeout=_triage_timeout_seconds(thinking),
         )
         raw_output = _parse_json(completion.raw_output)
         assessments = tuple(
@@ -581,6 +596,22 @@ def _fallback_assessment(evidence_id: str, reason: str) -> dict[str, Any]:
         "关键信息": f"初筛失败，终判必须阅读完整证据。{reason}"[:160],
         "初筛状态": "回退",
     }
+
+
+def _triage_timeout_seconds(thinking: str) -> float:
+    return env_float(
+        (
+            "MIMO_TRIAGE_QUALITY_TIMEOUT_SECONDS"
+            if thinking == "enabled"
+            else "MIMO_TRIAGE_TIMEOUT_SECONDS"
+        ),
+        (
+            DEFAULT_QUALITY_TRIAGE_TIMEOUT_SECONDS
+            if thinking == "enabled"
+            else DEFAULT_TRIAGE_TIMEOUT_SECONDS
+        ),
+        minimum=0.1,
+    )
 
 
 def _batch_metrics(

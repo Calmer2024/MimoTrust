@@ -10,8 +10,9 @@ from fastapi.testclient import TestClient
 from app.jobs.models import CreateJobRequest, JobSource, JobView
 from app.jobs.runtime import JobRuntime
 from app.jobs.store import SqlJobStore
-from app.jobs.worker import build_mobile_card
+from app.jobs.worker import build_mobile_card, stream_event_kind
 from app.jobs.models import utc_now
+from app.jobs import artifacts as artifacts_module
 
 
 def test_memory_runtime_is_idempotent_and_orders_events() -> None:
@@ -191,3 +192,31 @@ def test_create_job_api_returns_async_contract(monkeypatch) -> None:
     assert response.status_code == 202
     assert response.json()["event_url"] == "/v1/jobs/job-api/events"
     assert captured["verification_mode"] == "quality"
+
+def test_all_thinking_stages_use_the_standard_sse_event_kind() -> None:
+    assert stream_event_kind("m2_thinking") == "thinking_delta"
+    assert stream_event_kind("thinking") == "thinking_delta"
+    assert stream_event_kind("report") == "report_delta"
+
+
+def test_artifact_upload_timeout_does_not_block_job_completion(monkeypatch) -> None:
+    async def never_finishes(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(artifacts_module.asyncio, "to_thread", never_finishes)
+    monkeypatch.setattr(
+        artifacts_module,
+        "settings",
+        SimpleNamespace(
+            s3_endpoint_url="http://unreachable.invalid",
+            s3_access_key="test",
+            s3_secret_key="test",
+            s3_region="us-east-1",
+            s3_bucket="test",
+            s3_upload_timeout_seconds=0.01,
+        ),
+    )
+
+    result = asyncio.run(artifacts_module.store_job_artifacts("job-timeout", {}, "report"))
+
+    assert result is None

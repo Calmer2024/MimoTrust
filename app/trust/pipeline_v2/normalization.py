@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
-PROTOCOL_VERSION = "2"
+PROTOCOL_VERSION = "3"
 EXPRESSION_VALUES = frozenset({"直接", "转述", "隐含"})
-_TOP_LEVEL_FIELDS = frozenset({"主题", "主张"})
+_TOP_LEVEL_FIELDS = frozenset({"主题", "主张", "原始上下文"})
 _CLAIM_FIELDS = frozenset({"文本", "表达"})
 
 
@@ -31,6 +31,7 @@ def normalize_case_input(raw: Any, case_id: str | None = None) -> dict[str, Any]
 
     _reject_unknown_fields(raw, _TOP_LEVEL_FIELDS, "输入")
     topic = _required_text(raw, "主题", "输入")
+    source_context = _optional_text(raw, "原始上下文", "输入")
     raw_claims = raw.get("主张")
     if not isinstance(raw_claims, list) or not raw_claims:
         raise InputValidationError("输入.主张 必须是非空数组")
@@ -61,7 +62,7 @@ def normalize_case_input(raw: Any, case_id: str | None = None) -> dict[str, Any]
         raise InputValidationError("输入.主张 不得全部为重复项")
 
     resolved_case_id = normalize_case_id(case_id) if case_id else _derive_case_id(topic, claims)
-    return {
+    normalized = {
         "版本": PROTOCOL_VERSION,
         "案例编号": resolved_case_id,
         "主题": topic,
@@ -70,6 +71,9 @@ def normalize_case_input(raw: Any, case_id: str | None = None) -> dict[str, Any]
             for index, claim in enumerate(claims, start=1)
         ],
     }
+    if source_context:
+        normalized["原始上下文"] = source_context
+    return normalized
 
 
 def write_json_atomic(path: Path, value: Any) -> None:
@@ -92,6 +96,15 @@ def _required_text(container: dict[str, Any], key: str, path: str) -> str:
     if not normalized:
         raise InputValidationError(f"{path}.{key} 不得为空")
     return normalized
+
+
+def _optional_text(container: dict[str, Any], key: str, path: str) -> str:
+    value = container.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise InputValidationError(f"{path}.{key} 必须是字符串")
+    return value.strip()
 
 
 def _reject_unknown_fields(

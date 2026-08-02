@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 
 from app.models import StructuredInformation
-from app.trust.pipeline_v2.config import env_float, env_text
+from app.trust.pipeline_v2.config import env_float, env_int, env_text
 from app.trust.pipeline_v2.normalization import (
     write_json_atomic,
 )
@@ -203,6 +203,7 @@ async def verify_structured_information(
     verification_mode: VerificationMode = "speed",
     *,
     source_url: str | None = None,
+    source_context: str | None = None,
     progress: ProgressCallback | None = None,
     stream: Callable[[str, str], None | Awaitable[None]] | None = None,
     product: Callable[[dict[str, Any]], None | Awaitable[None]] | None = None,
@@ -221,6 +222,10 @@ async def verify_structured_information(
         raise ValueError("verification_mode 必须是 speed 或 quality")
 
     payload = structured.model_dump(mode="json", by_alias=True)
+    context_limit = env_int("MIMOTRUST_SOURCE_CONTEXT_MAX_CHARS", 12_000)
+    normalized_context = (source_context or "").strip()
+    if normalized_context and context_limit > 0:
+        payload["原始上下文"] = normalized_context[:context_limit]
     case_id = _case_id(payload, source_url)
     case_dir = _cases_root / case_id
     input_path = case_dir / "input.json"
@@ -229,7 +234,7 @@ async def verify_structured_information(
     thinking = "enabled" if quality else "disabled"
     retrieval_timeout_seconds = env_float(
         "EXA_QUALITY_TIMEOUT_SECONDS" if quality else "EXA_SPEED_TIMEOUT_SECONDS",
-        20.0 if quality else 10.0,
+        10.0,
         minimum=0.1,
     )
 

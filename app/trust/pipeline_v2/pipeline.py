@@ -83,6 +83,9 @@ async def run_full_pipeline(
         resolved_run_id,
         model=planning_model,
         thinking=planning_thinking,
+        stream_callback=(
+            lambda _kind, text: _emit_stream(stream, "m2_thinking", text)
+        ) if stream and planning_thinking == "enabled" else None,
     )
     await _emit_product(product, _plan_product(plan))
     await _emit(progress, "M3 并发检索执行")
@@ -107,6 +110,9 @@ async def run_full_pipeline(
         resolved_run_id,
         triage_model=triage_model,
         thinking=triage_thinking,
+        # M5 batches run concurrently; exposing their private token streams would
+        # interleave unrelated reasoning. Publish only the completed ledger.
+        stream_callback=None,
     )
     await _emit_product(product, _ledger_product(ledger, evidence_pool))
     await _emit(progress, "M6 最终研判")

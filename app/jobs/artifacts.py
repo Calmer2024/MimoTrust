@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 import boto3
+from botocore.config import Config
 
 from app.config import settings
 
@@ -25,6 +26,11 @@ async def store_job_artifacts(
             aws_access_key_id=settings.s3_access_key,
             aws_secret_access_key=settings.s3_secret_key,
             region_name=settings.s3_region,
+            config=Config(
+                connect_timeout=2,
+                read_timeout=3,
+                retries={"max_attempts": 1, "mode": "standard"},
+            ),
         )
         try:
             client.head_bucket(Bucket=settings.s3_bucket)
@@ -45,4 +51,10 @@ async def store_job_artifacts(
             )
         return f"/v1/jobs/{job_id}/report"
 
-    return await asyncio.to_thread(upload)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(upload),
+            timeout=max(0.1, settings.s3_upload_timeout_seconds),
+        )
+    except TimeoutError:
+        return None

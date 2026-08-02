@@ -12,6 +12,9 @@ import app.trust.service as service_module
 from app.models import StructuredInformation
 from app.trust.service import _client_result, verify_structured_information
 from app.trust.pipeline_v2.synthesis import validate_compact_report
+from app.trust.pipeline_v2.normalization import normalize_case_input
+from app.trust.pipeline_v2.evidence_triage import build_evidence_batches, build_triage_request
+from app.trust.pipeline_v2.planning import build_planning_request
 
 
 def test_report_without_cited_evidence_cannot_publish_a_strong_verdict() -> None:
@@ -31,6 +34,47 @@ def test_report_without_cited_evidence_cannot_publish_a_strong_verdict() -> None
     assert report["主张核验"][0]["证据充分度"] == "不足"
     assert report["叙事分析"]["判断"] == "证据不足"
     assert report["待补证据"]
+
+
+def test_narrative_guidance_cannot_leave_a_report_fully_credible() -> None:
+    report = validate_compact_report(
+        {
+            "o": ["可信", "可正常传播", "基础研究真实。", ["E1"]],
+            "c": [["C1", "属实", "充分", [["E1", "S"]], "原文支持。", ""]],
+            "n": ["存在引导", ["省略限定条件"], "省略条件会夸大实际影响。"],
+            "g": [],
+        },
+        {"案例编号": "case-one", "主张": [{"编号": "C1"}]},
+        {"证据": [{"证据编号": "E1"}]},
+    )
+
+    assert report["整体判断"]["结论"] == "大体可信"
+    assert report["整体判断"]["传播建议"] == "补充语境后传播"
+
+
+def test_source_context_reaches_planning_and_triage_requests(monkeypatch) -> None:
+    claims = normalize_case_input(
+        {
+            "主题": "驱蚊液研究的传播表述",
+            "主张": [{"文本": "实验中训练后的蚊子可能更接近含 DEET 气味的目标。", "表达": "转述"}],
+            "原始上下文": "驱蚊液完全失效，甚至会招蚊子，这是真的吗？",
+        },
+        case_id="context-case",
+    )
+    plan_request = build_planning_request(claims)
+    assert plan_request["审计输入"]["用户输入"]["案例"]["原始上下文"] == "驱蚊液完全失效，甚至会招蚊子，这是真的吗？"
+
+    evidence_pool = {
+        "案例编号": "context-case",
+        "证据": [{"证据编号": "E1", "标题": "论文", "链接": "https://example.com"}],
+    }
+    plan = {"核验项": [{"编号": "V1", "关联主张": ["C1"], "问题": "研究是否存在", "所需证据": "论文"}]}
+    batch = build_evidence_batches(evidence_pool)[0]
+    monkeypatch.setenv("MIMO_TRIAGE_QUALITY_MAX_COMPLETION_TOKENS", "12000")
+    request = build_triage_request(claims, plan, evidence_pool, batch, thinking="enabled")
+    encoded = request["消息"][1]["content"]
+    assert "驱蚊液完全失效，甚至会招蚊子" in encoded
+    assert request["参数"]["max_completion_tokens"] == 12000
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -216,7 +260,7 @@ def test_verification_mode_selects_all_thinking_and_retrieval_budget(
     assert captured[0]["report_thinking"] == "enabled"
     assert captured[0]["planning_thinking"] == "enabled"
     assert captured[0]["triage_thinking"] == "enabled"
-    assert captured[0]["retrieval_timeout_seconds"] == 20.0
+    assert captured[0]["retrieval_timeout_seconds"] == 10.0
     assert captured[1]["report_thinking"] == "disabled"
     assert captured[1]["planning_thinking"] == "disabled"
     assert captured[1]["triage_thinking"] == "disabled"
@@ -240,7 +284,7 @@ def test_verify_endpoint_persists_result_to_requested_cache(monkeypatch) -> None
     stored = {"structured_data": structured}
     writes: list[tuple[str, dict]] = []
 
-    async def fake_verify(_structured, _mode):
+    async def fake_verify(_structured, _mode, **_kwargs):
         return {"status": "completed", "overall_verdict": "可信"}
 
     monkeypatch.setattr(main_module, "verify_structured_information", fake_verify)

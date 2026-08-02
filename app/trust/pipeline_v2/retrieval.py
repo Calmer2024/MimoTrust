@@ -31,8 +31,9 @@ _QUERY_ID_PATTERN = re.compile(r"^Q[1-9][0-9]*$")
 _VERIFICATION_ID_PATTERN = re.compile(r"^V[1-9][0-9]*$")
 
 _EXA_PROVIDER_NAME = "exa"
-DEFAULT_EXA_NUM_RESULTS = 5
+DEFAULT_EXA_NUM_RESULTS = 10
 DEFAULT_EXA_TIMEOUT_SECONDS = 10.0
+DEFAULT_EXA_REQUEST_STAGGER_MS = 200
 RetrievalResultCallback = Callable[
     [dict[str, Any]], None | Awaitable[None]
 ]
@@ -161,10 +162,23 @@ async def execute_retrieval_tasks(
     providers: Mapping[str, SearchProvider],
     *,
     result_callback: RetrievalResultCallback | None = None,
+    start_stagger_ms: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Execute every task concurrently while isolating timeout and provider errors."""
+    """Execute concurrently with a small provider-friendly start stagger."""
+
+    stagger_ms = (
+        env_int(
+            "EXA_REQUEST_STAGGER_MS",
+            DEFAULT_EXA_REQUEST_STAGGER_MS,
+            minimum=0,
+        )
+        if start_stagger_ms is None
+        else max(0, start_stagger_ms)
+    )
 
     async def indexed(index: int, task: RetrievalTask) -> tuple[int, dict[str, Any]]:
+        if index and stagger_ms:
+            await asyncio.sleep(index * stagger_ms / 1000)
         return index, await _execute_one_task(task, providers)
 
     pending = [

@@ -1264,11 +1264,8 @@ private fun JobDetail(job: JobEntity, onBack: () -> Unit) {
                 item { LiveGeneration(job) }
             } else {
                 item { StructuredReport(job) }
-                job.processArtifacts?.takeIf { it.isNotBlank() }?.let {
-                    item { ProcessHistory(it) }
-                }
-                job.thinkingText?.takeIf { it.isNotBlank() }?.let {
-                    item { DisclosureSection("模型思考过程", it, initiallyExpanded = false) }
+                if (!job.processArtifacts.isNullOrBlank() || !job.thinkingText.isNullOrBlank()) {
+                    item { ProcessHistory(job.processArtifacts.orEmpty(), job.thinkingText) }
                 }
             }
             item {
@@ -1298,18 +1295,25 @@ private fun DetailSection(title: String, content: String) {
 
 @Composable
 private fun LiveGeneration(job: JobEntity) {
+    val thinkingStages = remember(job.thinkingText) { splitThinkingStages(job.thinkingText) }
+    val artifacts = remember(job.processArtifacts) { parseProcessArtifacts(job.processArtifacts.orEmpty()) }
+    val planningThinking = thinkingStages.firstOrNull { it.title == "检索规划的模型思考" }
+    val synthesisThinking = thinkingStages.firstOrNull { it.title == "综合研判的模型思考" }
+    val activeThinking = when {
+        synthesisThinking != null -> synthesisThinking
+        planningThinking != null && artifacts.none { it.kind == "plan" } -> planningThinking
+        else -> null
+    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("核验记录", color = Ink, fontWeight = FontWeight.Black, fontSize = 21.sp)
         Text("公开资料返回后会立即显示，你可以边等待边查看。", color = Muted, fontSize = 12.sp)
         job.processArtifacts?.takeIf { it.isNotBlank() }?.let {
-            ProcessArtifacts(it, active = true)
+            ProcessArtifacts(it, active = true, thinkingStages = thinkingStages)
         }
-        when {
-            job.processArtifacts.isNullOrBlank() -> ActiveProcessNode(job.displayText)
-            !job.thinkingText.isNullOrBlank() -> ActiveProcessNode("正在综合研判") {
-                ExpandableText("查看模型思考", job.thinkingText, initiallyExpanded = false)
+        ActiveProcessNode(job.displayText) {
+            activeThinking?.let {
+                ExpandableText("模型思考过程", it.content, initiallyExpanded = false)
             }
-            else -> ActiveProcessNode(job.displayText)
         }
     }
 }
@@ -1335,34 +1339,64 @@ private fun ActiveProcessNode(title: String, content: (@Composable () -> Unit)? 
 }
 
 @Composable
-private fun ProcessHistory(raw: String) {
+private fun ProcessHistory(raw: String, thinkingRaw: String?) {
+    val thinkingStages = remember(thinkingRaw) { splitThinkingStages(thinkingRaw) }
+    val synthesisThinking = thinkingStages.firstOrNull { it.title == "综合研判的模型思考" }
+        ?: thinkingStages.firstOrNull { it.title == "模型思考过程" }
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
     ) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("核验过程", color = Ink, fontWeight = FontWeight.Black, fontSize = 19.sp)
-            ProcessArtifacts(raw, active = false, initiallyExpanded = false)
+            ProcessArtifacts(
+                raw,
+                active = false,
+                initiallyExpanded = false,
+                thinkingStages = thinkingStages,
+                hasTrailingNode = synthesisThinking != null,
+            )
+            synthesisThinking?.let { ProcessThinkingNode("综合研判", it.content) }
         }
     }
 }
+
+private data class ThinkingStage(val title: String, val content: String)
+
+private val thinkingStageMarker = Regex("【(检索规划的模型思考|证据初筛的模型思考|综合研判的模型思考|模型思考)】\\n")
+
+private fun splitThinkingStages(raw: String?): List<ThinkingStage> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val matches = thinkingStageMarker.findAll(raw).toList()
+    if (matches.isEmpty()) return listOf(ThinkingStage("模型思考过程", raw.trim()))
+    return matches.mapIndexedNotNull { index, match ->
+        val end = matches.getOrNull(index + 1)?.range?.first ?: raw.length
+        val content = raw.substring(match.range.last + 1, end).trim()
+        content.takeIf { it.isNotBlank() }?.let { ThinkingStage(match.groupValues[1], it) }
+    }
+}
+
+private fun parseProcessArtifacts(raw: String): List<JobEventPayloadDto> =
+    raw.lineSequence().filter { it.isNotBlank() }.mapNotNull {
+        runCatching { Gson().fromJson(it, JobEventPayloadDto::class.java) }.getOrNull()
+    }.toList()
 
 @Composable
 private fun ProcessArtifacts(
     raw: String,
     active: Boolean,
     initiallyExpanded: Boolean = true,
+    thinkingStages: List<ThinkingStage> = emptyList(),
+    hasTrailingNode: Boolean = false,
 ) {
-    val artifacts = remember(raw) {
-        raw.lineSequence().filter { it.isNotBlank() }.mapNotNull {
-            runCatching { Gson().fromJson(it, JobEventPayloadDto::class.java) }.getOrNull()
-        }.toList()
-    }
+    val artifacts = remember(raw) { parseProcessArtifacts(raw) }
+    val planningThinking = thinkingStages.firstOrNull { it.title == "检索规划的模型思考" }
     val uriHandler = LocalUriHandler.current
     artifacts.forEachIndexed { index, artifact ->
         var expanded by remember(artifact.kind, artifact.title) { mutableStateOf(initiallyExpanded) }
         var showAll by remember(artifact.kind, artifact.title) { mutableStateOf(false) }
-        val hasFollowingNode = index < artifacts.lastIndex || active
+        val stageThinking = planningThinking.takeIf { artifact.kind == "plan" }
+        val hasFollowingNode = index < artifacts.lastIndex || active || hasTrailingNode
         Row(
             Modifier.fillMaxWidth().drawBehind {
                 if (hasFollowingNode) {
@@ -1398,6 +1432,9 @@ private fun ProcessArtifacts(
                 }
                 AnimatedVisibility(expanded) {
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        stageThinking?.let {
+                            ExpandableText("模型思考过程", it.content, initiallyExpanded = false)
+                        }
                         val allItems = artifact.items.orEmpty()
                         val visibleItems = if (showAll) allItems else allItems.take(4)
                         visibleItems.forEach { item -> ArtifactRow(item, uriHandler) }
@@ -1412,6 +1449,19 @@ private fun ProcessArtifacts(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ProcessThinkingNode(title: String, content: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.width(24.dp).padding(top = 5.dp), contentAlignment = Alignment.TopStart) {
+            Box(Modifier.size(11.dp).clip(CircleShape).background(Ink))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            ExpandableText("模型思考过程", content, initiallyExpanded = false)
         }
     }
 }

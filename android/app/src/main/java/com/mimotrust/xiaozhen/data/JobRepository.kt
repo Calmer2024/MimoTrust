@@ -118,7 +118,11 @@ class JobRepository(
                                 ?.let(::formatContentMetadata)
                                 ?: old.extractedMetadata,
                             thinkingText = when (event.eventKind) {
-                                "thinking_delta" -> appendDelta(old.thinkingText, event.payload?.text)
+                                "thinking_delta" -> appendStageThinking(
+                                    existing = old.thinkingText,
+                                    stage = event.stage,
+                                    delta = event.payload?.text,
+                                )
                                 "stream_reset" -> null
                                 else -> old.thinkingText
                             },
@@ -147,6 +151,19 @@ class JobRepository(
         override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {
             synchronized(this@JobRepository) { streams.remove(jobId) }
             scope.launch {
+                if (isTerminalEventStreamResponse(response?.code)) {
+                    dao.get(jobId)?.takeIf { it.status in setOf("queued", "running") }?.let { old ->
+                        val failed = old.copy(
+                            status = "failed",
+                            stage = "failed",
+                            displayText = "后端已重启，任务状态已失效，请重新核验",
+                            progress = 100,
+                        )
+                        dao.upsert(failed)
+                        notifier.showProgress(failed)
+                    }
+                    return@launch
+                }
                 delay(2_000)
                 if (dao.get(jobId)?.status in setOf("queued", "running")) observeEvents(jobId)
             }
@@ -273,9 +290,31 @@ class JobRepository(
         return ((existing ?: "") + delta).takeLast(200_000)
     }
 
+    private fun appendStageThinking(existing: String?, stage: String?, delta: String?): String? {
+        if (delta.isNullOrEmpty()) return existing
+        val heading = when (stage) {
+            "evidence_retrieval" -> "检索规划的模型思考"
+            "evidence_triage" -> "证据初筛的模型思考"
+            "report_generating" -> "综合研判的模型思考"
+            else -> "模型思考"
+        }
+        val marker = "【$heading】\n"
+        val latestHeading = existing
+            ?.let { Regex("【([^】]+)】\\n").findAll(it).lastOrNull()?.groupValues?.getOrNull(1) }
+        val prefix = if (existing.isNullOrBlank() || latestHeading != heading) {
+            if (existing.isNullOrBlank()) marker else "\n\n$marker"
+        } else {
+            ""
+        }
+        return ((existing ?: "") + prefix + delta).takeLast(200_000)
+    }
+
     private fun appendArtifact(existing: String?, payload: Any?): String? {
         if (payload == null) return existing
         val line = gson.toJson(payload)
         return ((existing ?: "") + line + "\n").takeLast(300_000)
     }
 }
+
+internal fun isTerminalEventStreamResponse(statusCode: Int?): Boolean =
+    statusCode == 404 || statusCode == 410

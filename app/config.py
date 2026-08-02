@@ -68,6 +68,9 @@ class Settings:
     s3_secret_key: str = os.getenv("S3_SECRET_KEY", "").strip()
     s3_bucket: str = os.getenv("S3_BUCKET", "mimotrust-artifacts").strip()
     s3_region: str = os.getenv("S3_REGION", "us-east-1").strip()
+    s3_upload_timeout_seconds: float = float(
+        os.getenv("S3_UPLOAD_TIMEOUT_SECONDS", "5")
+    )
 
 
 settings = Settings()
