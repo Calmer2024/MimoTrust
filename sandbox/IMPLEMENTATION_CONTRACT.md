@@ -1,8 +1,9 @@
 # MiMoTrust 受控内容沙盒实施合同
 
 > 状态：已冻结  
-> 日期：2026-08-01  
-> 依据：《MiMoTrust 受控内容沙盒跨系统协作文档》Context 2.1
+> 日期：2026-08-02
+> 当前实现依据：《MiMoTrust 受控内容沙盒跨系统协作文档》Context 2.1
+> 目标合同：Context 2.2 已批准，当前代码、Schema、样例和 APK 尚未迁移
 
 ## 固定标识
 
@@ -48,3 +49,33 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 - 纯文章、图文和图片资源已有本地固定快照；
 - 音频素材尚未提供，注册表中只能标为 `pending_asset`，不得生成伪造的有效 Manifest；
 - 原始素材不移动、不覆盖，沙盒只保存用于固定演示快照的副本。
+
+## 已批准目标合同：Context 2.2（未实现）
+
+本节描述下一阶段实现目标，不代表当前 APK 已具备这些行为。在 2.2 迁移完成并通过合同测试、Flutter 测试和真机验收前，上文“固定标识”和“固定行为”仍准确描述当前 2.1 代码。
+
+| 项目 | 目标值 |
+|---|---|
+| 守护者请求 Action | `com.mimotrust.intent.action.REQUEST_CONTENT_CONTEXT` |
+| 请求目标包 | `com.mimotrust.controlledcontent` |
+| 请求 Extra | `request_id`（UUID） |
+| 沙盒响应 Action | `com.mimotrust.intent.action.CONTENT_CONTEXT` |
+| 响应目标包 | `com.mimotrust.guardian` |
+| 响应 Extra | `payload` |
+| Context Schema | `2.2` |
+| 主动请求 trigger | `guardian_request` |
+
+目标行为：
+
+- 普通浏览、播放、切页和停留仍不发送跨 App 消息；Flutter 仅在 App 内维护当前内容和查看状态；
+- `comment/share` 发送 `content_access.mode = deferred_grant` 的候选通知，不申请可用 grant；
+- 候选只使守护者悬浮球进入 `AVAILABLE`/闪烁，不自动上传、兑换或下载；
+- 用户点击悬浮球后，守护者先发送带 `request_id` 的显式请求；无需先触发候选通知；
+- 沙盒请求 Receiver 只在 `MainActivity` resumed 时动态注册；无前台有效内容时不响应；
+- 沙盒收到请求后快照当前内容/查看状态，申请新鲜 180 秒一次性 grant，并返回 `trigger = guardian_request`、`event_id = request_id` 的 Context 2.2；
+- 守护者以 3–5 秒超时、防抖和 `event_id` 唯一约束处理重复点击/响应；只有 `guardian_request` 响应进入后端队列；
+- 迁移期守护者兼容读取 2.1/2.2，且不得自动消费 2.1 `comment/share` 中的 grant；
+- 悬浮球点击不得伪装成 `comment/share`，不得使用无障碍或屏幕抓取取得第三方 App 内容；
+- 统一签名后，`com.mimotrust.permission.SEND_CONTENT_CONTEXT` 同时保护请求和响应方向；Debug 联调暂不启用。
+
+完成目标迁移时必须同步更新 JSON Schema、正反样例、Dart 模型、Kotlin 双向广播、守护者模型、后端合同和自动化测试，不能只修改版本号。

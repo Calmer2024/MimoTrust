@@ -1,9 +1,10 @@
 # MiMoTrust 受控内容沙盒冻结规格
 
-> 状态：待确认  
-> 版本：0.4  
-> 日期：2026-08-01  
+> 状态：已冻结目标合同；实现迁移中
+> 版本：0.5
+> 日期：2026-08-02
 > 目标：以最小实现验证“平台授权提供当前内容，守护者完成缓存或核验”的完整链路。
+> 实施现状：目标为 Context 2.2；当前 APK、JSON Schema、样例和代码仍是 Context 2.1
 
 > 命名说明：对外产品名和英文标识统一为 `MiMoTrust`；下文统一使用小写技术标识 `mimotrust`。
 
@@ -14,7 +15,8 @@
 ```text
 受控内容 Android App
   -> 模拟真实浏览、评论和转发场景
-  -> 发送内容引用、查看状态和一次性 grant
+  -> comment/share 只发送候选通知
+  -> 响应守护者主动请求，发送当前查看状态和一次性 grant
 
 最小平台内容网关
   -> 签发和兑换 grant
@@ -59,9 +61,11 @@ Flutter project:  mimotrust_controlled_content
 applicationId:    com.mimotrust.controlledcontent
 guardian package: com.mimotrust.guardian
 MethodChannel:    com.mimotrust.controlledcontent/context
-Broadcast Action: com.mimotrust.intent.action.CONTENT_CONTEXT
-Intent Extra:     payload
-Context Schema:   2.1
+Request Action:   com.mimotrust.intent.action.REQUEST_CONTENT_CONTEXT
+Request Extra:    request_id
+Response Action:  com.mimotrust.intent.action.CONTENT_CONTEXT
+Response Extra:   payload
+Context Schema:   2.2 (target; current implementation is 2.1)
 Manifest Schema:  1.0
 ```
 
@@ -100,18 +104,29 @@ Manifest Schema:  1.0
 
 内容上架全部采用手工流程：开发者通过阿里云 OSS 控制台上传文件，记录 URL 和资源属性，在本地计算 SHA-256，然后手工更新 Manifest 与内容注册表。内容上传操作在项目外完成，沙盒不建设内容上传能力。
 
-## 5. 两种触发的冻结语义
+## 5. 三种触发的冻结语义
 
 | 触发 | 精确定义 |
 |---|---|
-| `comment` | 打开评论面板时发送，不表示提交评论，不传评论正文 |
-| `share` | 打开转发面板时发送，不表示分享完成，不传联系人 |
+| `comment` | 打开评论面板时发送候选通知，不表示提交评论，不传评论正文，不申请或携带可用 grant |
+| `share` | 打开转发面板时发送候选通知，不表示分享完成，不传联系人，不申请或携带可用 grant |
+| `guardian_request` | 用户点击守护者悬浮球后，守护者请求沙盒当前内容；沙盒即时快照状态并申请新鲜 grant 后响应 |
 
-普通浏览、播放、切页和页面停留不发送上下文，沙盒不实现停留计时器或自动预分析。两种触发只发送候选上下文，不保证守护者创建核验任务。
+普通浏览、播放、切页和页面停留不发送跨 App 上下文，沙盒不实现停留计时器或自动预分析。Flutter 仅在 App 内维护当前内容和查看状态。`comment/share` 只让守护者保存候选并使悬浮球闪烁，不自动提交后端、兑换 grant 或下载资源。
+
+用户无需先打开评论或转发面板。只要受控内容沙盒在前台且存在有效当前内容，点击悬浮球就能发起 `guardian_request`。该“任何时候”不覆盖第三方 App；禁止使用无障碍、屏幕抓取或常驻监听推断当前内容。
 
 ## 6. 广播与网关
 
-广播严格遵循《MiMoTrust 守护者 App 跨系统协作文档》 Schema 2.1，不传输媒体二进制、评论正文、联系人、Cookie 和长期凭证。
+目标双向广播严格遵循《MiMoTrust 守护者 App 跨系统协作文档》Context 2.2，不传输媒体二进制、评论正文、联系人、Cookie 和长期凭证：
+
+```text
+守护者 -> 沙盒：REQUEST_CONTENT_CONTEXT，目标 com.mimotrust.controlledcontent，Extra request_id
+沙盒 -> 守护者：CONTENT_CONTEXT，目标 com.mimotrust.guardian，Extra payload
+guardian_request 响应：event_id = request_id
+```
+
+沙盒请求 Receiver 只在 `MainActivity` resumed 期间动态注册；退后台或无有效内容时不响应。守护者使用 3–5 秒超时并显示不可用，不得无限等待。双方统一签名后，同一个 signature 权限 `com.mimotrust.permission.SEND_CONTENT_CONTEXT` 保护两个方向；Debug 联调阶段暂不开启。
 
 网关最小接口：
 
@@ -121,31 +136,35 @@ POST /v1/context-grants
 POST /v1/grants/exchange
 ```
 
-grant 有效期默认 180 秒，一次性兑换，绑定 `mimotrust_guardian_backend` audience、内容 ID、版本和 scope。续期接口只在端到端分析证明确实需要时增加。
+`comment/share` 的 `content_access.mode` 固定为 `deferred_grant`，不含可兑换 grant。仅 `guardian_request` 响应使用 `grant_exchange`：沙盒在收到请求后申请默认 180 秒、一次性兑换并绑定 `mimotrust_guardian_backend` audience、内容 ID、版本和 scope 的新鲜 grant。续期接口只在端到端分析证明确实需要时增加。
+
+迁移期间守护者兼容读取 2.1 和 2.2；任何 2.1 `comment/share` 中已有 grant 也只能作为候选，不允许自动兑换。悬浮球点击不得伪装成 `comment` 或 `share`。
 
 ## 7. 验收标准
 
 1. Debug APK 可在目标 Android 真机安装运行；
 2. 五种内容类型可浏览，当前音视频唯一播放；
-3. `comment/share` 均发送正确当前内容，单纯停留不发送上下文；
-4. Payload 的 ID、版本、SHA-256 和查看位置与当前项一致；
-5. 守护者缺失、网关失败和媒体加载失败均不导致 App 崩溃；
-6. grant 可正常兑换一次，过期、重放和错误 audience 被拒绝；
-7. 守护者后端能读取 Manifest、下载资源并校验 SHA-256；
-8. 真机完成快速切页、后台、断网、守护者缺失和网关拒绝回归；
-9. 归档 APK、APK SHA-256、发送/接收/兑换日志和演示录屏。
+3. `comment/share` 只提示候选，单纯停留不发送，三者均不自动获取资源；
+4. 沙盒前台有内容时，无需 `comment/share` 前置动作，点击悬浮球能取得 Context 2.2；
+5. `guardian_request` Payload 的 `event_id/request_id`、ID、版本、SHA-256 和查看位置与响应瞬间当前项一致；
+6. 沙盒退后台或无内容时在 3–5 秒内显示不可用；快速重复点击只创建一个请求/任务；
+7. 守护者缺失、网关失败和媒体加载失败均不导致 App 崩溃；
+8. grant 可正常兑换一次，过期、重放和错误 audience 被拒绝；
+9. 守护者后端能读取 Manifest、下载资源并校验 SHA-256；
+10. 真机完成视频、文章、画廊状态、快速切页、后台、断网和网关拒绝回归；
+11. 归档 APK、APK SHA-256、请求/响应/兑换日志和演示录屏。
 
 ## 8. 实施顺序与时间盒
 
 ```text
-合同 Schema 和正反样例
-  -> 一条视频的内容注册和 Manifest
-  -> Mock 网关申请/兑换
-  -> Flutter 静态 Feed
-  -> 单条视频播放
-  -> 三种互动与触发
-  -> MethodChannel 与显式广播
-  -> 与守护者联调
+Context 2.2 Schema、正反样例及 2.1 兼容读取
+  -> 守护者悬浮球、前台服务/通知降级与状态机
+  -> 守护者主动请求、超时、防抖和请求关联
+  -> 沙盒前台动态 Receiver 与当前状态快照
+  -> comment/share deferred_grant 候选通知
+  -> guardian_request 新鲜 grant 响应
+  -> 守护者可靠入队与后端提交
+  -> 网关兑换和一条视频端到端联调
   -> 扩展其他内容类型
   -> 异常、缓存和真机验收
 ```
@@ -156,22 +175,18 @@ grant 有效期默认 180 秒，一次性兑换，绑定 `mimotrust_guardian_bac
 
 | 检查项 | 结果 |
 |---|---|
-| Flutter / Dart | 本地 SDK 为 Flutter 3.44.2 / Dart 3.12.2；当前受限执行环境无法写入 SDK `bin/cache/lockfile`，创建工程前需在可写环境复查 `flutter doctor -v` |
+| Flutter / Dart | Flutter 3.44.2 / Dart 3.12.2；当前三视频工程已完成构建、分析和测试 |
 | ADB | 36.0.0 可用 |
-| Android 真机 | 当前未连接 |
-| Java | JDK 17.0.10 可用 |
-| Android SDK | 当前可见路径只确认 `platform-tools`，Platform 和 Build Tools 尚未确认 |
+| Android 真机 | 已在 Xiaomi 25057RA09C、Android 16 / API 36 完成 2.1 发送端验证；当前会话未连接 |
+| Java / Android SDK | JDK 17.0.10 可用；现有工程已成功构建 targetSdk 36 APK |
 | Python | 3.12.2 可用 |
-| FFmpeg / ffprobe | 未安装；第一版使用 HTTP 元数据和 Android 实播验证，不因此引入安装任务 |
-| D 盘空间 | 约 78.2 GB 可用 |
+| 本地网关 | 代码与测试已完成；当前未运行，默认使用 `127.0.0.1:8787` 和 `adb reverse` |
 | 现有视频网络 | 3 条 URL 均返回 HTTP 200、`video/mp4` 并支持 Range |
 
-## 10. 确认后动作
+## 10. 下一阶段动作
 
-团队确认本规格后：
-
-1. 将状态改为“已冻结”；
-2. 先解决 Flutter 命令超时和 Android SDK Platform/Build Tools 路径；
-3. 在 `sandbox/` 下从零创建工程；
-4. 以一条视频完成首个纵向链路；
+1. 更新 Context 2.2 Schema、样例和合同测试；
+2. 创建守护者工程并实现悬浮球主动请求链路；
+3. 在现有沙盒工程增加 resumed 动态 Receiver、状态快照和 Context 2.2 响应；
+4. 以一条视频完成双向端到端链路，再覆盖文章和画廊状态；
 5. 每完成一层立即验证，不等到最后集中排错。

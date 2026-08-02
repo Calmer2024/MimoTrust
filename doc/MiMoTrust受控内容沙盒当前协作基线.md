@@ -3,7 +3,7 @@
 > 状态：当前实施与联调基线  
 > 更新时间：2026-08-02  
 > 适用团队：受控内容沙盒、守护者 App、守护者后端、平台内容网关  
-> 权威关系：本文汇总当前事实，不替代冻结规格、Context 2.1 Schema 或 Manifest 1.0 Schema
+> 权威关系：本文区分当前 2.1 实现与已批准的 2.2 目标，不替代冻结规格、Schema 或 Manifest 1.0
 
 ## 1. 当前结论
 
@@ -18,16 +18,20 @@
 当前不建设上传页面、上传 API、自动上传脚本、推荐系统、账号系统或核验逻辑。后期可
 将手工 registry 替换为自动上架数据源，但不得因此修改已经冻结的跨系统合同。
 
-## 2. 固定协议
+2026-08-02 已批准 Context 2.2 主动请求交互：`comment/share` 只通知候选并让守护者悬浮球提示；用户点击悬浮球后，守护者先向前台沙盒请求当前内容，沙盒才申请新鲜 grant 并响应。该目标合同已写入文档，但当前 APK、Schema、样例和测试尚未迁移，仍为 Context 2.1。
+
+## 2. 当前与目标协议
 
 | 项目 | 固定值 |
 |---|---|
 | 沙盒 applicationId | `com.mimotrust.controlledcontent` |
 | 守护者 applicationId | `com.mimotrust.guardian` |
 | Flutter MethodChannel | `com.mimotrust.controlledcontent/context` |
-| Broadcast Action | `com.mimotrust.intent.action.CONTENT_CONTEXT` |
-| Intent Extra | `payload` |
-| Context Schema | `2.1` |
+| 守护者请求 Action（2.2 目标） | `com.mimotrust.intent.action.REQUEST_CONTENT_CONTEXT` |
+| 请求目标 / Extra | `com.mimotrust.controlledcontent` / `request_id` |
+| 沙盒响应/候选 Action | `com.mimotrust.intent.action.CONTENT_CONTEXT` |
+| 响应目标 / Extra | `com.mimotrust.guardian` / `payload` |
+| Context Schema | 当前 `2.1`；目标 `2.2` |
 | Manifest Schema | `1.0` |
 | Provider ID | `mimotrust_sandbox` |
 | Audience | `mimotrust_guardian_backend` |
@@ -44,9 +48,9 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 
 | 系统 | 负责 | 不负责 |
 |---|---|---|
-| 受控内容沙盒 | 展示固定内容、本地互动、申请 grant、发送当前内容上下文 | 搜索、真假判断、核验任务、报告展示 |
+| 受控内容沙盒 | 展示固定内容、本地维护当前状态；候选通知；主动请求时申请 grant 并响应 | 搜索、真假判断、核验任务、报告展示 |
 | 平台内容网关 | 校验内容身份、签发/兑换一次性 grant、返回 Manifest | 上传页面、推荐、分析、证据检索 |
-| 守护者 App | 用户授权、Receiver 校验、`event_id` 幂等、可靠入队、状态展示 | 在 `onReceive()` 中执行下载、HTTP、模型或检索 |
+| 守护者 App | 用户授权、悬浮球、主动请求/超时、Receiver 校验、候选提示、请求响应幂等入队、状态展示 | 因候选自动获取资源；在 `onReceive()` 中执行下载、HTTP、模型或检索 |
 | 守护者后端 | 兑换 grant、读取内容、校验哈希、缓存、分析、检索、证据和任务状态 | 信任设备时间或把广播成功当作任务成功 |
 
 ## 4. 当前实施状态
@@ -59,6 +63,9 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 | Flutter Android App | 完成当前视频阶段 | 三视频竖向 Feed、本地互动和异常降级 |
 | Flutter 到 Kotlin | 完成 | 固定 MethodChannel，单字符串 Payload |
 | Kotlin 显式广播 | 完成 | 固定 Action、目标包和 Extra，32 KB 上限 |
+| Context 2.2 Schema/样例 | 待迁移 | 目标合同已冻结，尚未改代码和合同测试 |
+| 沙盒主动请求 Receiver | 待实现 | 仅在 `MainActivity` resumed 时动态注册 |
+| 守护者悬浮球/主动请求 | 待实现 | 包含权限、前台服务/通知降级、六态状态机、超时和防抖 |
 | 守护者 Receiver | 待守护者团队完成 | 当前真机未安装 `com.mimotrust.guardian` |
 | 守护者可靠入队 | 待守护者团队完成 | 需要授权、幂等存储和 WorkManager |
 | 守护者后端 | 待后端团队确认 | 部署地址、认证和负责人尚未提供 |
@@ -83,7 +90,7 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 `display_metrics` 只用于沙盒界面。点赞数叠加本机点赞状态，评论数叠加本地评论，
 转发数叠加本次运行完成的模拟转发。所有互动数量均不进入 Manifest 1.0 或 Context 2.1。
 
-## 6. 触发语义
+## 6. 当前 2.1 触发语义
 
 | 用户动作 | 发送 Context | 本地效果 |
 |---|---:|---|
@@ -100,7 +107,9 @@ Debug 联调阶段暂不启用 signature 权限。双方统一签名证书后，
 分享完成。Payload 不得包含评论正文、联系人、用户稳定标识、Cookie、长期凭据、媒体
 二进制、完整浏览历史或核验结论，UTF-8 编码后不得超过 32 KB。
 
-## 7. 当前数据流
+当前 APK 会在 `comment/share` 时先申请 grant。迁移期间守护者收到这种 2.1 Payload 时只能保存候选并提示悬浮球，不得自动入队、兑换或下载。
+
+## 7. 当前 2.1 数据流
 
 ```mermaid
 sequenceDiagram
@@ -127,6 +136,38 @@ sequenceDiagram
 
 广播是单向、尽力交付，不提供业务 ACK。`sendBroadcast()` 返回不代表 Receiver 已接收，
 更不代表后端已创建核验任务。
+
+### 7.1 已批准的 Context 2.2 目标数据流
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant S as 受控内容沙盒
+    participant G as 守护者 App
+    participant P as 平台内容网关
+    participant B as 守护者后端
+
+    Note over S: 普通浏览只更新 App 内当前状态，不跨 App 发送
+    opt 打开评论或转发面板
+        S->>G: CONTENT_CONTEXT (2.2, comment/share, deferred_grant)
+        G->>G: 保存候选，悬浮球 AVAILABLE/闪烁
+        Note over G,P: 不提交后端、不兑换 grant、不下载资源
+    end
+    U->>G: 点击悬浮球
+    G->>G: 生成 UUID request_id，进入 REQUESTING
+    G->>S: REQUEST_CONTENT_CONTEXT (request_id)
+    S->>S: 快照当前 content_ref/view_state
+    S->>P: POST /v1/context-grants
+    P-->>S: 新鲜 180 秒一次性 grant
+    S->>G: CONTENT_CONTEXT (2.2, guardian_request, event_id=request_id)
+    G->>G: 校验、关联、幂等入队，进入 PROCESSING
+    G->>B: POST /v1/content-contexts
+    B->>P: POST /v1/grants/exchange
+    P-->>B: Manifest 1.0 + 短期资源
+    B-->>G: 缓存/任务/报告状态
+```
+
+用户无需先触发 `comment/share`。只要沙盒在前台且有有效当前内容，悬浮球在 `IDLE` 状态也可点击。沙盒退后台或无内容时不响应，守护者在 3–5 秒后显示不可用。不得使用无障碍或屏幕抓取扩展到第三方 App。
 
 ## 8. 平台内容网关合同
 
@@ -180,7 +221,7 @@ CONTENT_UNAVAILABLE
 
 ## 9. Android 广播合同
 
-沙盒发送方式固定为：
+当前 2.1 沙盒发送方式为：
 
 ```kotlin
 Intent("com.mimotrust.intent.action.CONTENT_CONTEXT")
@@ -188,15 +229,24 @@ Intent("com.mimotrust.intent.action.CONTENT_CONTEXT")
     .putExtra("payload", payloadJson)
 ```
 
-守护者 Receiver 的最小处理顺序：
+目标 2.2 增加守护者请求：
+
+```kotlin
+Intent("com.mimotrust.intent.action.REQUEST_CONTENT_CONTEXT")
+    .setPackage("com.mimotrust.controlledcontent")
+    .putExtra("request_id", requestId)
+```
+
+守护者 Receiver 的目标处理顺序：
 
 ```text
 验证 Action 和 payload 存在
   -> 检查用户当前授权
   -> 检查 32 KB 上限
-  -> 解析 JSON 并校验 Context 2.1
-  -> 以 event_id 插入唯一待处理记录
-  -> 调度唯一后台上传工作
+  -> 解析 JSON，并兼容校验 Context 2.1/2.2
+  -> comment/share: 去重保存候选并提示悬浮球，立即返回
+  -> guardian_request: 校验 event_id = 待处理 request_id
+  -> 以 event_id 插入唯一待处理记录并调度唯一后台上传工作
   -> 立即返回
 ```
 
@@ -230,7 +280,7 @@ POST /v1/content-contexts
 {
   "request_id": "8f052041-20f1-4a38-82be-5663dad7787e",
   "guardian_app_version": "0.1.0",
-  "context": { "schema_version": "2.1" }
+  "context": { "schema_version": "2.2", "trigger": "guardian_request" }
 }
 ```
 
@@ -261,6 +311,8 @@ GET /v1/verification-tasks/{task_id}
 
 ```text
 MiMoTrustSandbox:  CONTENT_CONTEXT_SEND event_id=... type=... trigger=...
+MiMoTrustGuardian: CONTENT_CONTEXT_REQUEST request_id=...
+MiMoTrustSandbox:  CONTENT_CONTEXT_REQUEST_RECEIVED request_id=...
 MiMoTrustReceiver: CONTENT_CONTEXT_RECEIVED event_id=... type=... trigger=...
 MiMoTrustReceiver: CONTENT_CONTEXT_REJECTED event_id=... reason=...
 MiMoTrustGuardian: CONTEXT_UPLOAD_ENQUEUED event_id=... request_id=...
@@ -326,15 +378,15 @@ adb reverse --list
 
 ## 14. 下一轮协作顺序
 
-1. 守护者团队创建或确认 `com.mimotrust.guardian` 工程，并完成 Receiver 最小日志；
-2. 使用固定 ADB Payload 验证授权、合法接收、非法拒收和 `event_id` 幂等；
-3. 实现本地有限待处理队列和唯一 WorkManager，不在 Receiver 中执行长任务；
-4. 后端团队确认 `POST /v1/content-contexts` 地址、认证、负责人和固定假响应；
-5. 守护者完成上传、缓存状态、任务状态和失败状态界面；
-6. 安装正式守护者包，用沙盒真实 comment/share 替换 ADB 输入；
-7. 后端兑换 grant、读取三条视频 Manifest、下载资源并校验 SHA-256；
-8. 保存发送、接收、入队、兑换和任务日志，完成首条视频端到端验收；
-9. 沙盒再扩展文章、图文和图片，音频等待真实素材。
+1. 更新 `contracts/content_context.schema.json`、正反样例和合同测试到 2.2，定义 `deferred_grant` 与 `guardian_request`，保留守护者 2.1 兼容读取；
+2. 创建守护者工程，完成授权、悬浮窗权限、前台服务/通知降级和六态悬浮球；
+3. 实现 `REQUEST_CONTENT_CONTEXT`、UUID `request_id`、3–5 秒超时、点击防抖和 ADB 固定测试；
+4. 守护者 Receiver 区分候选与请求响应：前者仅保存并提示，后者校验关联后幂等入队；
+5. 沙盒实现仅 resumed 动态注册的请求 Receiver、Flutter 当前状态快照和新鲜 grant 响应；
+6. 将沙盒 `comment/share` 改为 2.2 `deferred_grant`，不再提前申请 grant；
+7. 后端确认接口后，完成唯一 WorkManager、提交、grant 兑换、Manifest 读取和状态展示；
+8. 真机验收无前置候选点击、超时、重复点击、断网、沙盒后台、视频/文章/画廊状态；
+9. 保存双向广播、入队、兑换和任务日志，再扩展文章、图文和图片；音频等待真实素材。
 
 ## 15. 待确认事项
 
@@ -343,6 +395,8 @@ adb reverse --list
 | 守护者工程目录和技术栈 | 守护者 App | 待确认 |
 | Receiver 组件名与安装包 | 守护者 App | 待提供 |
 | 用户授权状态的数据来源 | 守护者 App | 待确认 |
+| 悬浮窗权限与厂商后台限制 | 守护者 App | 需在目标真机验证 |
+| 无悬浮窗权限时的通知入口 | 守护者 App | 合同要求提供降级入口 |
 | 后端部署地址和认证 | 守护者后端 | 待提供 |
 | `POST /v1/content-contexts` 负责人 | 守护者后端 | 待指定 |
 | 报告第一版展示形态 | 守护者 App/产品 | 待确认 |
@@ -354,6 +408,8 @@ adb reverse --list
 
 - 代码与口头约定冲突时，以冻结 Schema、合同样例和冻结规格为准；
 - 增加可选字段可保持 `2.x`，删除字段、改变类型或语义必须升级主版本；
+- 迁移期守护者兼容 Context 2.1/2.2；2.1 `comment/share` 也只能按候选处理；
+- 悬浮球点击固定使用 `guardian_request`，不得伪装成 `comment/share`；
 - 未识别的 `trigger`、`content_type` 或访问模式必须拒收；
 - 合同变更必须同步更新 Schema、正反样例、沙盒、Receiver、后端和网关测试；
 - 包名、Action、Extra、Schema、Provider ID 和 Audience 不得由任一团队单方修改；
@@ -361,9 +417,9 @@ adb reverse --list
 
 ## 17. 关联文件
 
-- `沙盒下阶段实现交接说明.md`；
-- `MiMoTrust受控内容沙盒冻结规格.md`；
-- `MiMoTrust受控内容沙盒跨系统协作文档.md`；
+- `doc/沙盒下阶段实现交接说明.md`；
+- `doc/MiMoTrust受控内容沙盒冻结规格.md`；
+- `doc/MiMoTrust受控内容沙盒跨系统协作文档.md`；
 - `contracts/content_context.schema.json`；
 - `contracts/content_manifest.schema.json`；
 - `sandbox/IMPLEMENTATION_CONTRACT.md`；
