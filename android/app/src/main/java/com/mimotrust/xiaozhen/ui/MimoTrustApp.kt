@@ -1034,7 +1034,7 @@ private fun AssistantResultBubble(job: JobEntity) {
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text("最终判定 · 正在生成", color = Orange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text("$streamed▍", color = Ink, fontSize = 14.sp, lineHeight = 22.sp)
+                    Text(streamed, color = Ink, fontSize = 14.sp, lineHeight = 22.sp)
                 }
             }
         }
@@ -1475,18 +1475,14 @@ private fun HistoryScreen(
             ).any { it.contains(keyword, ignoreCase = true) }
         }
     }
-    LazyColumn(
-        state = listState,
-        modifier = modifier.fillMaxSize().background(Paper),
-        contentPadding = PaddingValues(22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            Box(Modifier.fillMaxWidth().padding(bottom = 10.dp), contentAlignment = Alignment.Center) {
-                Text("核实记录", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
+    Column(modifier.fillMaxSize().background(Paper)) {
+        Column(
+            Modifier.fillMaxWidth().padding(start = 22.dp, top = 22.dp, end = 22.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("历史", fontSize = 18.sp, color = Ink, fontWeight = FontWeight.Bold)
             }
-        }
-        item {
             Row(
                 Modifier.fillMaxWidth().height(46.dp).clip(RoundedCornerShape(23.dp))
                     .background(Color.White).padding(horizontal = 15.dp),
@@ -1515,10 +1511,17 @@ private fun HistoryScreen(
                 }
             }
         }
-        when {
-            jobs.isEmpty() -> item { EmptyHistory() }
-            filteredJobs.isEmpty() -> item { EmptySearchResult(query) }
-            else -> items(filteredJobs, key = { it.jobId }) { JobCard(it, onOpen) }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            when {
+                jobs.isEmpty() -> item { EmptyHistory() }
+                filteredJobs.isEmpty() -> item { EmptySearchResult(query) }
+                else -> items(filteredJobs, key = { it.jobId }) { JobCard(it, onOpen) }
+            }
         }
     }
 }
@@ -1990,7 +1993,7 @@ private fun LiveVerdictDraft(job: JobEntity) {
             Text(job.displayText, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
         streamingOverallText(job.reportDraft)?.let {
-            Text("$it▍", color = Ink, fontSize = 15.sp, lineHeight = 24.sp)
+            Text(it, color = Ink, fontSize = 15.sp, lineHeight = 24.sp)
         }
     }
 }
