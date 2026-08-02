@@ -43,6 +43,10 @@ class RetrievalValidationError(ValueError):
     """Raised when a formal M2 plan cannot be executed safely."""
 
 
+class RetrievalConfigurationError(RuntimeError):
+    """Raised when public-source retrieval cannot start due to missing configuration."""
+
+
 @dataclass(frozen=True)
 class RetrievalTask:
     task_id: str
@@ -290,8 +294,13 @@ async def run_m3_case(
 def create_default_providers(
     client: httpx.AsyncClient,
 ) -> dict[str, SearchProvider]:
+    api_key = os.environ.get("EXA_API_KEY", "").strip()
+    if not api_key:
+        raise RetrievalConfigurationError(
+            "公开来源检索未配置：请设置 EXA_API_KEY 后重新核验"
+        )
     return {
-        "exa": ExaProvider(client, os.environ.get("EXA_API_KEY", "")),
+        "exa": ExaProvider(client, api_key),
     }
 
 

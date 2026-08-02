@@ -167,4 +167,4 @@ def test_android_consumes_and_displays_complete_report_sections() -> None:
     assert "查看全部" in ui
     assert 'getSharedPreferences("mimo-ui"' in ui
     assert 'putString("verification-mode"' in ui
-    assert "VerificationModeControl" in ui
+    assert "VerificationModeMenu" in ui

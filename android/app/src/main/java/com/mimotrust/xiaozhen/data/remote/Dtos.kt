@@ -105,6 +105,8 @@ data class EvidenceDto(
 )
 
 data class VerificationDetailsDto(
+    val status: String? = null,
+    val message: String? = null,
     val topic: String? = null,
     @SerializedName("overall_verdict") val overallVerdict: String? = null,
     val conclusion: String? = null,

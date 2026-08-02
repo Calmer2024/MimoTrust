@@ -1,6 +1,14 @@
 import asyncio
 
-from app.trust.pipeline_v2.retrieval import RetrievalTask, execute_retrieval_tasks
+import httpx
+import pytest
+
+from app.trust.pipeline_v2.retrieval import (
+    RetrievalConfigurationError,
+    RetrievalTask,
+    create_default_providers,
+    execute_retrieval_tasks,
+)
 from app.trust.pipeline_v2.search_providers import ProviderPayload
 
 
@@ -72,3 +80,14 @@ def test_retrieval_can_stagger_request_starts_without_serializing_results() -> N
 
     assert len(provider.started) == 2
     assert provider.started[1] - provider.started[0] >= 0.015
+
+
+def test_default_retrieval_fails_fast_when_exa_is_not_configured(monkeypatch) -> None:
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+
+    async def run() -> None:
+        async with httpx.AsyncClient() as client:
+            with pytest.raises(RetrievalConfigurationError, match="EXA_API_KEY"):
+                create_default_providers(client)
+
+    asyncio.run(run())

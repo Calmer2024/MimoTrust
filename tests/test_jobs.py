@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.jobs.models import CreateJobRequest, JobSource, JobView
 from app.jobs.runtime import JobRuntime
 from app.jobs.store import SqlJobStore
-from app.jobs.worker import build_mobile_card, stream_event_kind
+from app.jobs.worker import build_mobile_card, should_retry_with_visual, stream_event_kind
 from app.jobs.models import utc_now
 from app.jobs import artifacts as artifacts_module
 
@@ -107,6 +107,37 @@ def test_mobile_card_uses_neutral_user_copy() -> None:
     assert card.headline == "内容可能造成误导"
     assert card.evidence_count == 3
     assert card.elapsed_ms == 12_300
+
+
+def test_mobile_card_explains_when_content_has_no_verifiable_claims() -> None:
+    result = SimpleNamespace(
+        verification={
+            "status": "skipped",
+            "message": "当前内容没有需要外部事实核验的现实世界主张。",
+        },
+        structured_data=SimpleNamespace(claims=[]),
+        full_pipeline_milliseconds=11_080,
+    )
+
+    card = build_mobile_card("job-empty", result, utc_now())
+
+    assert card.verdict == "无需核验"
+    assert card.headline == "未识别到可核验主张"
+    assert card.conclusion == "当前内容没有需要外部事实核验的现实世界主张。"
+
+
+def test_empty_claims_without_visual_analysis_trigger_visual_retry() -> None:
+    result = SimpleNamespace(
+        structured_data=SimpleNamespace(claims=[]),
+        coverage=SimpleNamespace(visual_analyzed=False),
+    )
+    assert should_retry_with_visual(result) is True
+
+    result.coverage.visual_analyzed = True
+    assert should_retry_with_visual(result) is False
+
+    result.structured_data.claims = [SimpleNamespace(text="一项可核验主张")]
+    assert should_retry_with_visual(result) is False
 
 
 def test_android_routes_plain_text_to_agent_context() -> None:

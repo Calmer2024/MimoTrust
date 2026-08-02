@@ -54,8 +54,7 @@ class JobRepository(
                 clientRequestId = clientRequestId,
             ),
         )
-        dao.upsert(
-            JobEntity(
+        val queuedJob = JobEntity(
                 jobId = response.jobId,
                 sourceText = text.take(500),
                 status = response.status,
@@ -66,8 +65,8 @@ class JobRepository(
                 elapsedMs = 0,
                 createdAt = response.createdAt,
             )
-        )
-        notifier.showQueued(response.jobId)
+        dao.upsert(queuedJob)
+        notifier.showQueued(queuedJob)
         observeEvents(response.jobId)
         return response.jobId
     }
@@ -137,8 +136,11 @@ class JobRepository(
                             },
                         )
                         dao.upsert(updated)
-                        notifier.showProgress(updated)
-                        if (status == "completed") loadResult(jobId)
+                        when (status) {
+                            "completed" -> loadResult(jobId)
+                            "failed", "cancelled" -> notifier.showResult(updated)
+                            else -> notifier.showProgress(updated)
+                        }
                     },
                 )
             }

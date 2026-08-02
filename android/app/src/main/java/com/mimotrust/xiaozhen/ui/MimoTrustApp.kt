@@ -14,14 +14,15 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -103,6 +104,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mimotrust.xiaozhen.R
@@ -155,38 +157,56 @@ fun MimoTrustApp(viewModel: MainViewModel, initialJobId: String?) {
         val historyListState = rememberLazyListState()
         val settingsListState = rememberLazyListState()
         val selected = jobs.firstOrNull { it.jobId == selectedId }
+        var displayedDetail by remember { mutableStateOf(selected) }
         val density = LocalDensity.current
         val imeBottom = with(density) { WindowInsets.ime.getBottom(this).toDp() }
         val composerBottomInset = maxOf(0.dp, BottomBarHeight - imeBottom)
 
-        if (selected != null) {
-            JobDetail(selected) { selectedId = null }
-            return@MimoTheme
+        LaunchedEffect(selected) {
+            if (selected != null) displayedDetail = selected
         }
 
-        Scaffold(
-            containerColor = Paper,
-            bottomBar = { BottomNavigation(selectedTab) { selectedTab = it } },
-        ) { scaffoldPadding ->
-            when (selectedTab) {
-                MainTab.Chat -> ChatScreen(
-                    jobs = jobs,
-                    onVerify = viewModel::verify,
-                    onOpen = { selectedId = it.jobId },
-                    listState = chatListState,
-                    composerBottomInset = composerBottomInset,
-                    modifier = Modifier.padding(top = scaffoldPadding.calculateTopPadding()),
-                )
-                MainTab.History -> HistoryScreen(
-                    jobs = jobs,
-                    onOpen = { selectedId = it.jobId },
-                    listState = historyListState,
-                    modifier = Modifier.padding(scaffoldPadding),
-                )
-                MainTab.Settings -> SettingsScreen(
-                    listState = settingsListState,
-                    modifier = Modifier.padding(scaffoldPadding),
-                )
+        Box(Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = Paper,
+                bottomBar = { BottomNavigation(selectedTab) { selectedTab = it } },
+            ) { scaffoldPadding ->
+                when (selectedTab) {
+                    MainTab.Chat -> ChatScreen(
+                        jobs = jobs,
+                        onVerify = viewModel::verify,
+                        onOpen = { selectedId = it.jobId },
+                        listState = chatListState,
+                        composerBottomInset = composerBottomInset,
+                        modifier = Modifier.padding(top = scaffoldPadding.calculateTopPadding()),
+                    )
+                    MainTab.History -> HistoryScreen(
+                        jobs = jobs,
+                        onOpen = { selectedId = it.jobId },
+                        listState = historyListState,
+                        modifier = Modifier.padding(scaffoldPadding),
+                    )
+                    MainTab.Settings -> SettingsScreen(
+                        listState = settingsListState,
+                        modifier = Modifier.padding(scaffoldPadding),
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = selected != null,
+                enter = slideInHorizontally(
+                    initialOffsetX = { it },
+                    animationSpec = tween(320),
+                ) + fadeIn(animationSpec = tween(220)),
+                exit = slideOutHorizontally(
+                    targetOffsetX = { it },
+                    animationSpec = tween(300),
+                ) + fadeOut(animationSpec = tween(180)),
+                modifier = Modifier.fillMaxSize().zIndex(10f),
+            ) {
+                (selected ?: displayedDetail)?.let { detail ->
+                    JobDetail(detail) { selectedId = null }
+                }
             }
         }
     }
@@ -273,7 +293,12 @@ private fun ChatScreen(
         }
 
         BrandHeader(
-            Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(3f).background(Paper)
+            verificationMode = verificationMode,
+            onVerificationModeChange = { mode ->
+                verificationMode = mode
+                preferences.edit().putString("verification-mode", mode).apply()
+            },
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().zIndex(3f).background(Paper)
                 .padding(start = 22.dp, top = 8.dp, end = 22.dp, bottom = 6.dp),
         )
 
@@ -284,11 +309,6 @@ private fun ChatScreen(
             ChatComposer(
                 value = input,
                 onValueChange = { input = it },
-                verificationMode = verificationMode,
-                onVerificationModeChange = { mode ->
-                    verificationMode = mode
-                    preferences.edit().putString("verification-mode", mode).apply()
-                },
                 photo = photo,
                 videoUri = videoUri,
                 onClearPhoto = { photo = null },
@@ -312,6 +332,8 @@ private fun ChatScreen(
 
 @Composable
 private fun BrandHeader(
+    verificationMode: String,
+    onVerificationModeChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var muted by remember { mutableStateOf(false) }
@@ -328,7 +350,7 @@ private fun BrandHeader(
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
             Text("小真", fontSize = 16.sp, color = Ink)
-            Text("事实核验助手", fontSize = 11.sp, color = LightMuted)
+            VerificationModeMenu(verificationMode, onVerificationModeChange)
         }
         IconButton(
             onClick = { muted = !muted },
@@ -342,6 +364,79 @@ private fun BrandHeader(
             )
         }
     }
+}
+
+@Composable
+private fun VerificationModeMenu(selected: String, onChange: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(contentAlignment = Alignment.TopCenter) {
+        Row(
+            modifier = Modifier.width(120.dp).height(22.dp).clip(RoundedCornerShape(11.dp))
+                .clickable { expanded = true }.padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                if (selected == "quality") "高质量思考" else "快速思考",
+                color = LightMuted,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+            )
+            Spacer(Modifier.width(3.dp))
+            Icon(Lucide.ChevronDown, "切换核验模式", tint = LightMuted, modifier = Modifier.size(13.dp))
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.width(280.dp),
+            offset = DpOffset(x = (-80).dp, y = 4.dp),
+            shape = RoundedCornerShape(18.dp),
+            containerColor = Color.White,
+        ) {
+            VerificationModeMenuItem(
+                title = "快速思考",
+                subtitle = "适合日常快速核验",
+                icon = Lucide.Zap,
+                selected = selected == "speed",
+            ) {
+                onChange("speed")
+                expanded = false
+            }
+            VerificationModeMenuItem(
+                title = "高质量思考",
+                subtitle = "进行更完整的证据检索",
+                icon = Lucide.Brain,
+                selected = selected == "quality",
+            ) {
+                onChange("quality")
+                expanded = false
+            }
+        }
+    }
+}
+
+@Composable
+private fun VerificationModeMenuItem(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(title, color = Ink, fontSize = 13.sp, lineHeight = 18.sp)
+                Text(subtitle, color = LightMuted, fontSize = 11.sp, lineHeight = 15.sp)
+            }
+        },
+        onClick = onClick,
+        leadingIcon = { Icon(icon, null, tint = Cocoa, modifier = Modifier.size(18.dp)) },
+        trailingIcon = {
+            if (selected) Icon(Lucide.Check, "当前模式", tint = Green, modifier = Modifier.size(17.dp))
+        },
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+    )
 }
 
 @Composable
@@ -397,8 +492,6 @@ private fun StartPrompt(onPick: (String) -> Unit) {
 private fun ChatComposer(
     value: String,
     onValueChange: (String) -> Unit,
-    verificationMode: String,
-    onVerificationModeChange: (String) -> Unit,
     photo: Bitmap?,
     videoUri: Uri?,
     onClearPhoto: () -> Unit,
@@ -413,14 +506,6 @@ private fun ChatComposer(
         modifier = modifier.fillMaxWidth().imePadding()
             .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 4.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("核验方式", color = LightMuted, fontSize = 11.sp)
-            Spacer(Modifier.weight(1f))
-            VerificationModeControl(verificationMode, onVerificationModeChange)
-        }
         if (photo != null) {
             Row(
                 Modifier.padding(start = 12.dp, bottom = 8.dp).clip(RoundedCornerShape(16.dp)).background(SurfaceSoft)
@@ -1494,25 +1579,6 @@ private fun ArtifactRow(
 }
 
 @Composable
-private fun VerificationModeControl(selected: String, onChange: (String) -> Unit) {
-    Row(Modifier.clip(RoundedCornerShape(10.dp)).background(Soft).padding(3.dp)) {
-        listOf("speed" to "快速", "quality" to "高质量").forEach { (mode, label) ->
-            val active = selected == mode
-            Text(
-                label,
-                color = if (active) Ink else Muted,
-                fontSize = 11.sp,
-                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp))
-                    .background(if (active) Color.White else Color.Transparent)
-                    .clickable { onChange(mode) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-            )
-        }
-    }
-}
-
-@Composable
 private fun DisclosureSection(title: String, content: String, initiallyExpanded: Boolean) {
     Card(
         shape = RoundedCornerShape(24.dp),
@@ -1571,6 +1637,25 @@ private fun StructuredReport(job: JobEntity) {
     val evidenceById = report.evidenceUsed.orEmpty().associateBy { it.id }
     Column(verticalArrangement = Arrangement.spacedBy(30.dp)) {
         ReportHero(job, report)
+        if (report.claimChecks.isNullOrEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xFFEFF4FF)).padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(Lucide.Info, null, tint = Color(0xFF4F7FE8), modifier = Modifier.size(20.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("未识别到可核验主张", color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        report.message ?: job.conclusion ?: "当前内容没有需要外部事实核验的现实世界主张。",
+                        color = Muted,
+                        fontSize = 12.sp,
+                        lineHeight = 19.sp,
+                    )
+                }
+            }
+        }
         report.narrativeAnalysis?.let { narrative ->
             Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
                 ReportSectionTitle(Lucide.MessagesSquare, "叙事分析")
@@ -1601,10 +1686,12 @@ private fun StructuredReport(job: JobEntity) {
                 }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            ReportSectionTitle(Lucide.ListChecks, "逐项核验")
-            report.claimChecks.orEmpty().forEach { check ->
-                ClaimReportCard(check, evidenceById)
+        if (!report.claimChecks.isNullOrEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ReportSectionTitle(Lucide.ListChecks, "逐项核验")
+                report.claimChecks.forEach { check ->
+                    ClaimReportCard(check, evidenceById)
+                }
             }
         }
         report.evidenceGaps?.takeIf { it.isNotEmpty() }?.let { gaps ->

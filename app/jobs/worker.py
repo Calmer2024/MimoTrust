@@ -8,6 +8,7 @@ from app.jobs.artifacts import store_job_artifacts
 from app.jobs.models import EvidenceSummary, MobileResultCard, utc_now
 from app.jobs.runtime import JobRuntime
 from app.models import AnalyzeRequest, AnalyzeResponse
+from app.trust.pipeline_v2.retrieval import RetrievalConfigurationError
 
 
 STAGE_DETAILS = {
@@ -43,8 +44,31 @@ def _evidence_summaries(verification: dict[str, Any]) -> list[EvidenceSummary]:
     return output
 
 
+def should_retry_with_visual(result: AnalyzeResponse) -> bool:
+    """Escalate sparse video extraction before declaring that there is nothing to verify."""
+    claims = getattr(getattr(result, "structured_data", None), "claims", None) or []
+    visual_analyzed = bool(
+        getattr(getattr(result, "coverage", None), "visual_analyzed", False)
+    )
+    return not claims and not visual_analyzed
+
+
 def build_mobile_card(job_id: str, result: AnalyzeResponse, completed_at: datetime) -> MobileResultCard:
     verification = result.verification or {}
+    claims = getattr(getattr(result, "structured_data", None), "claims", None) or []
+    if verification.get("status") == "skipped" and not claims:
+        return MobileResultCard(
+            job_id=job_id,
+            verdict="无需核验",
+            headline="未识别到可核验主张",
+            conclusion=str(
+                verification.get("message")
+                or "当前内容没有需要外部事实核验的现实世界主张。"
+            ),
+            evidence_count=0,
+            elapsed_ms=result.full_pipeline_milliseconds,
+            completed_at=completed_at,
+        )
     verdict = str(verification.get("overall_verdict") or "待核实")
     headline_map = {
         "属实": "证据支持主要说法",
@@ -161,6 +185,27 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
                 verify=False,
             ))
         await ensure_not_cancelled()
+        if (
+            job.source.type != "agent_context"
+            and job.mode == "auto"
+            and should_retry_with_visual(result)
+        ):
+            await runtime.emit(
+                job_id,
+                "media_extracting",
+                "running",
+                "口播信息不足，正在补充分析画面",
+                34,
+                elapsed_ms=elapsed(),
+            )
+            result = await analyze_content(AnalyzeRequest(
+                url=job.source.value,
+                input_kind="auto",
+                mode="visual",
+                refresh=True,
+                verify=False,
+            ))
+            await ensure_not_cancelled()
         metadata = result.metadata
         await on_product({
             "kind": "content",
@@ -249,6 +294,19 @@ async def process_job(runtime: JobRuntime, job_id: str) -> None:
         await runtime.emit(
             job_id, "cancelled", "cancelled", "核验已取消", 100,
             status="cancelled", completed_at=utc_now(), elapsed_ms=elapsed(),
+        )
+    except RetrievalConfigurationError as exc:
+        await runtime.emit(
+            job_id,
+            "failed",
+            "failed",
+            "公开来源检索未配置，请配置 EXA_API_KEY 后重试",
+            100,
+            status="failed",
+            completed_at=utc_now(),
+            elapsed_ms=elapsed(),
+            error_code=type(exc).__name__,
+            error_message=str(exc)[:500],
         )
     except Exception as exc:
         await runtime.emit(
