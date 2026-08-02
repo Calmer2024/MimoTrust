@@ -7,7 +7,8 @@ plugins {
 
 android {
     namespace = "com.mimotrust.xiaozhen"
-    compileSdk = 35
+    compileSdk = 36
+    buildToolsVersion = "36.1.0"
 
     defaultConfig {
         applicationId = "com.mimotrust.guardian"

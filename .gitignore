@@ -12,3 +12,4 @@ android/.gradle/
 android/.kotlin/
 android/app/build/
 sandbox/content_gateway/*.log
+android/.idea/
