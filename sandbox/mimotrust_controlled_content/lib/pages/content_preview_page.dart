@@ -1,23 +1,118 @@
 import 'package:flutter/material.dart';
 
+import '../models/content_context.dart';
 import '../models/sandbox_content.dart';
+import '../services/content_grant_client.dart';
+import '../services/context_dispatcher.dart';
+import '../services/context_transport.dart';
 
-class ContentPreviewPage extends StatelessWidget {
+class ContentPreviewPage extends StatefulWidget {
   const ContentPreviewPage({
     super.key,
     required this.content,
     required this.onOpen,
+    this.isActive = true,
+    this.contextDispatcher,
   });
 
   final SandboxContent content;
   final VoidCallback onOpen;
+  final bool isActive;
+  final ContextDispatcher? contextDispatcher;
+
+  @override
+  State<ContentPreviewPage> createState() => _ContentPreviewPageState();
+}
+
+class _ContentPreviewPageState extends State<ContentPreviewPage>
+    with WidgetsBindingObserver {
+  late final ContextDispatcher _contextDispatcher;
+  late final bool _ownsContextDispatcher;
+  late final GuardianContextRequestHandler _guardianRequestHandler;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsContextDispatcher = widget.contextDispatcher == null;
+    _contextDispatcher =
+        widget.contextDispatcher ??
+        ContextDispatcher(
+          GatewayContentGrantClient(
+            baseUrl: Uri.parse(
+              const String.fromEnvironment(
+                'MIMOTRUST_GATEWAY_URL',
+                defaultValue: 'http://127.0.0.1:8787',
+              ),
+            ),
+          ),
+        );
+    _guardianRequestHandler = _handleGuardianRequest;
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ContentPreviewPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive == widget.isActive) return;
+    if (widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    } else {
+      GuardianRequestBridge.deactivate(_guardianRequestHandler);
+    }
+  }
+
+  Future<void> _handleGuardianRequest(String requestId) async {
+    if (!mounted ||
+        !widget.isActive ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      throw StateError('No foreground active content.');
+    }
+    await _contextDispatcher.dispatchGuardianRequest(
+      requestId: requestId,
+      content: widget.content,
+      viewState: _currentViewState(),
+      observedAt: DateTime.now().toUtc(),
+    );
+  }
+
+  ContentViewState _currentViewState() {
+    final content = widget.content;
+    if (content case final ImageGalleryContent gallery) {
+      return GalleryViewState(
+        activeAssetIndex: 0,
+        assetCount: gallery.images.length,
+      );
+    }
+    return ReadingViewState(scrollRatio: 0, blockIndex: 0);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    } else if (state != AppLifecycleState.resumed) {
+      GuardianRequestBridge.deactivate(_guardianRequestHandler);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    GuardianRequestBridge.deactivate(_guardianRequestHandler);
+    if (_ownsContextDispatcher) _contextDispatcher.close();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final content = widget.content;
     return switch (content) {
       final ImageGalleryContent gallery => _GalleryPreview(
         content: gallery,
-        onOpen: onOpen,
+        onOpen: widget.onOpen,
       ),
       final RichArticleContent article => _ReadingPreview(
         content: article,
@@ -31,12 +126,12 @@ class ContentPreviewPage extends StatelessWidget {
             .firstOrNull
             ?.text,
         actionLabel: '阅读图文',
-        onOpen: onOpen,
+        onOpen: widget.onOpen,
       ),
       final ArticleContent article => _ReadingPreview(
         content: article,
         actionLabel: '阅读全文',
-        onOpen: onOpen,
+        onOpen: widget.onOpen,
       ),
       _ => const SizedBox.shrink(),
     };

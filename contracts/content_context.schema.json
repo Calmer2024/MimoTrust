@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.mimotrust.local/content-context-2.1.json",
+  "$id": "https://schemas.mimotrust.local/content-context-2.2.json",
   "title": "MiMoTrust Content Context",
   "type": "object",
   "additionalProperties": false,
@@ -16,9 +16,9 @@
     "observed_at"
   ],
   "properties": {
-    "schema_version": { "const": "2.1" },
+    "schema_version": { "const": "2.2" },
     "event_id": { "type": "string", "format": "uuid" },
-    "trigger": { "enum": ["comment", "share"] },
+    "trigger": { "enum": ["comment", "share", "guardian_request"] },
     "source_app": { "const": "mimotrust_controlled_content" },
     "provider": { "$ref": "#/$defs/provider" },
     "content_ref": { "$ref": "#/$defs/content_ref" },
@@ -65,6 +65,28 @@
         }
       },
       "then": { "properties": { "view_state": { "$ref": "#/$defs/gallery_view_state" } } }
+    },
+    {
+      "if": { "properties": { "trigger": { "const": "guardian_request" } } },
+      "then": {
+        "properties": {
+          "content_access": {
+            "properties": { "mode": { "const": "grant_exchange" } },
+            "required": ["exchange_url", "grant_code", "audience", "expires_at", "scopes"]
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "trigger": { "enum": ["comment", "share"] } } },
+      "then": {
+        "properties": {
+          "content_access": {
+            "properties": { "mode": { "const": "deferred_grant" } },
+            "maxProperties": 1
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -102,7 +124,7 @@
       "additionalProperties": false,
       "required": ["mode"],
       "properties": {
-        "mode": { "enum": ["grant_exchange", "public_manifest", "content_uri"] },
+        "mode": { "enum": ["deferred_grant", "grant_exchange", "public_manifest", "content_uri"] },
         "exchange_url": { "type": "string", "format": "uri" },
         "grant_code": { "type": "string", "minLength": 1, "maxLength": 512 },
         "audience": { "const": "mimotrust_guardian_backend" },

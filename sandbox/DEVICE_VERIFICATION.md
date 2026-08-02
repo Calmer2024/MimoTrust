@@ -84,5 +84,19 @@ Receiver 安装后进行，不得改投 `com.mimotrust.xiaozhen`。
 - `adb reverse --list` 为空，App 不依赖本地端口转发；
 - 打开评论面板后记录到一条 `trigger=comment` 的 `CONTENT_CONTEXT_SEND`。
 
-本次只验证当前 Context 2.1 沙盒发送端改用云端网关。Context 2.2 主动请求和正式守护者
-Receiver 仍未实施。公网入口目前是 Debug 明文 HTTP，正式演示前必须迁移到 HTTPS 域名。
+以上记录属于旧 Context 2.1 APK 的历史验收。公网入口目前是 Debug 明文 HTTP，正式演示前
+必须迁移到 HTTPS 域名。
+
+## Context 2.2 构建状态（2026-08-02）
+
+- Schema、样例、Dart 模型、Kotlin 前台动态 Receiver 和五类当前状态快照已迁移到 2.2；
+- `comment/share` 使用 `deferred_grant`，不访问网关；
+- `guardian_request` 使用 Guardian 的 `request_id`，收到请求后才申请新鲜 grant；
+- Dart 静态分析：无问题；Flutter 测试：`38/38`；
+- 合同校验：6 个合法 Context、7 个非法 Context、3 个内置活动 Manifest；
+- 云端 Debug APK 构建通过，大小 `220011733` bytes；
+- APK SHA-256：`32fcbbe4db201fede4b3d917e0568d778be151659c0392157e1a1a596eccf85b`；
+- 当前 ADB 未连接设备，尚未取得候选接收、主动请求、grant 响应和后端兑换的真机日志。
+
+main 分支 Guardian 当前严格接受 2.2，且资源兑换仍只处理视频。下一次真机验收先覆盖三条
+视频，再单独扩展并验收音频、文章、图文和图集。

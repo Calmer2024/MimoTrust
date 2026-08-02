@@ -1,8 +1,8 @@
 # MiMoTrust 守护者 App 跨系统协作文档
 
-> 状态：Context 2.2 目标合同已冻结，代码迁移与联调待完成
+> 状态：Context 2.2 合同已冻结，沙盒迁移完成，双向真机联调待完成
 > 文档版本：0.7
-> 目标上下文协议：2.2（当前 APK、Schema、样例仍为 2.1）
+> 当前上下文协议：2.2
 > 当前实施中心：MiMoTrust 守护者 Android App  
 > 更新日期：2026-08-02
 
@@ -34,12 +34,12 @@ MiMoTrust 受控内容沙盒只用于验证“平台在用户授权后向守护�
 |---|---|
 | 业务边界和演示场景 | 已冻结 |
 | `com.mimotrust.*` 命名、Manifest 1.0 | 已冻结并已实现 |
-| Context 2.1 | 当前已实现；5 个合法、5 个非法样例通过合同测试 |
-| Context 2.2 主动请求 | 文档已冻结；Schema、样例、代码和测试尚未迁移 |
-| 内容数据 | 3 条活动视频 Manifest 已校验；文章/图文/图片待加入 Feed，音频待真实素材 |
-| 受控内容 App | 三视频 Flutter Android 发送端已完成并真机验证 |
+| Context 2.2 | 沙盒已实现；6 个合法、7 个非法样例通过合同测试 |
+| Context 2.2 主动请求 | 沙盒 Receiver、状态快照、deferred grant 和 Debug APK 已完成；真机待验收 |
+| 内容数据 | 云端 Feed 当前有视频、文章、图文和图集；音频待真实素材 |
+| 受控内容 App | 五类 Flutter Android App 已构建；2.2 双向链路待真机验证 |
 | 平台内容网关 | 本地 Mock 已完成；180 秒内存 grant、一次兑换 |
-| 守护者 App/后端 | 尚未实现或联调 |
+| 守护者 App/后端 | main 已实现视频请求、兑换和任务流程；双向真机与非视频待完成 |
 
 因此，守护者 App 当前不应等待沙盒完成后再开发。守护者组先使用固定 JSON 样例、ADB 测试广播和可替换的假后端完成接收链路；沙盒完成后只替换测试输入，不修改守护者核心逻辑。
 
@@ -149,7 +149,7 @@ flowchart LR
 | 沙盒响应与候选 Action | `com.mimotrust.intent.action.CONTENT_CONTEXT` |
 | 响应目标包 / Extra | `com.mimotrust.guardian` / `payload` |
 | 目标上下文 Schema | `2.2` |
-| 当前实现 Schema | `2.1`（迁移期只读兼容） |
+| 当前实现 Schema | `2.2` |
 | Content Manifest Schema | `1.0` |
 | 沙盒 Provider ID | `mimotrust_sandbox` |
 | 守护者后端 audience | `mimotrust_guardian_backend` |
@@ -601,7 +601,8 @@ HASH_MISMATCH
 ## 17. 仍待联调确认
 
 `com.mimotrust.*`、双向 Broadcast Action/Extra、Context Schema 2.2、Manifest
-Schema 1.0、Provider ID 和 audience 已于 2026-08-02 固定。当前实现仍为 2.1，完成 Schema、样例、代码和测试迁移前不得声称 2.2 已交付。后续仍需联调确认：
+Schema 1.0、Provider ID 和 audience 已于 2026-08-02 固定。沙盒代码、Schema、样例、
+测试和 Debug APK 已迁移到 2.2；在取得双向真机日志前不得声称端到端 2.2 已交付。后续仍需联调确认：
 
 1. 守护者 App 最终技术栈和新建目录；
 2. 守护者后端 `POST /v1/content-contexts` 的部署地址、认证方式和负责人；

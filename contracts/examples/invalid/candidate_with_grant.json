@@ -14,11 +14,18 @@
     "content_hash": "0f6c57d2f3f2772a3abfde87b52123c45228a420e40cada19035dd26afa2f734",
     "canonical_url": "https://sandbox.mimotrust.local/content/video-001"
   },
-  "content_access": { "mode": "deferred_grant" },
+  "content_access": {
+    "mode": "grant_exchange",
+    "exchange_url": "https://gateway.mimotrust.local/v1/grants/exchange",
+    "grant_code": "candidate-must-not-carry-this",
+    "audience": "mimotrust_guardian_backend",
+    "expires_at": "2026-08-02T20:03:00+08:00",
+    "scopes": ["manifest:read", "asset:read"]
+  },
   "view_state": {
     "position_ms": 3500,
     "duration_ms": 22467,
     "is_playing": true
   },
-  "observed_at": "2026-08-01T20:00:00+08:00"
+  "observed_at": "2026-08-02T20:00:00+08:00"
 }

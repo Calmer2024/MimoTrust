@@ -10,6 +10,7 @@ import '../models/sandbox_content.dart';
 import '../models/video_content.dart';
 import '../services/content_grant_client.dart';
 import '../services/context_dispatcher.dart';
+import '../services/context_transport.dart';
 import '../services/local_interaction_store.dart';
 import '../services/playback_lifecycle_policy.dart';
 import '../widgets/comments_sheet.dart';
@@ -154,6 +155,7 @@ class _VideoContentPageState extends State<VideoContentPage>
                   return ContentPreviewPage(
                     key: ValueKey('${content.id}:${content.version}'),
                     content: content,
+                    isActive: index == _activeIndex,
                     onOpen: () => _openDetails(content),
                   );
                 },
@@ -210,6 +212,7 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
   final PlaybackLifecyclePolicy _playbackLifecycle = PlaybackLifecyclePolicy();
   late final ContextDispatcher _contextDispatcher;
   late final bool _ownsContextDispatcher;
+  late final GuardianContextRequestHandler _guardianRequestHandler;
 
   static const _presetComments = <SandboxComment>[
     SandboxComment(author: '访客 01', body: '这个说法有可靠的原始来源吗？'),
@@ -233,7 +236,11 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
             ),
           ),
         );
+    _guardianRequestHandler = _handleGuardianRequest;
     WidgetsBinding.instance.addObserver(this);
+    if (widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    }
     unawaited(_initialize());
     unawaited(_loadInteractions());
   }
@@ -243,7 +250,13 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.content.videoUrl != widget.content.videoUrl) {
       unawaited(_initialize());
-    } else if (oldWidget.isActive != widget.isActive) {
+    }
+    if (oldWidget.isActive != widget.isActive) {
+      if (widget.isActive) {
+        GuardianRequestBridge.activate(_guardianRequestHandler);
+      } else {
+        GuardianRequestBridge.deactivate(_guardianRequestHandler);
+      }
       unawaited(_syncActiveState());
     }
     if (oldWidget.content.id != widget.content.id ||
@@ -467,6 +480,12 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
   }
 
   void _requestContext(ContextTrigger trigger) {
+    unawaited(
+      _dispatchContext(trigger, _currentViewState(), DateTime.now().toUtc()),
+    );
+  }
+
+  MediaViewState _currentViewState() {
     final controller = _controller;
     final initialized = controller?.value.isInitialized ?? false;
     final duration = initialized && controller!.value.duration > Duration.zero
@@ -474,12 +493,25 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
         : widget.content.duration;
     final durationMs = duration.inMilliseconds.clamp(1, 1 << 31);
     final rawPositionMs = controller?.value.position.inMilliseconds ?? 0;
-    final viewState = MediaViewState(
+    return MediaViewState(
       positionMs: rawPositionMs.clamp(0, durationMs),
       durationMs: durationMs,
       isPlaying: controller?.value.isPlaying ?? false,
     );
-    unawaited(_dispatchContext(trigger, viewState, DateTime.now().toUtc()));
+  }
+
+  Future<void> _handleGuardianRequest(String requestId) async {
+    if (!mounted ||
+        !widget.isActive ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      throw StateError('No foreground active content.');
+    }
+    await _contextDispatcher.dispatchGuardianRequest(
+      requestId: requestId,
+      content: widget.content,
+      viewState: _currentViewState(),
+      observedAt: DateTime.now().toUtc(),
+    );
   }
 
   Future<void> _dispatchContext(
@@ -504,6 +536,13 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      GuardianRequestBridge.deactivate(_guardianRequestHandler);
+    } else if (state == AppLifecycleState.resumed && widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    }
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
       return;
@@ -527,6 +566,7 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    GuardianRequestBridge.deactivate(_guardianRequestHandler);
     if (_ownsContextDispatcher) {
       _contextDispatcher.close();
     }

@@ -2,7 +2,8 @@ import 'dart:convert';
 
 enum ContextTrigger {
   comment('comment'),
-  share('share');
+  share('share'),
+  guardianRequest('guardian_request');
 
   const ContextTrigger(this.wireValue);
 
@@ -177,22 +178,37 @@ class ContentContext {
   ContentContext({
     required this.eventId,
     required this.trigger,
-    required this.grant,
+    required ContentGrant grant,
     required this.viewState,
     required this.observedAt,
-  }) {
-    if (!RegExp(
-      r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
-      caseSensitive: false,
-    ).hasMatch(eventId)) {
-      throw ArgumentError.value(eventId, 'eventId');
+  }) : grant = grant,
+       _contentReference = null {
+    _validateEventId(eventId);
+    if (trigger != ContextTrigger.guardianRequest) {
+      throw ArgumentError('A fresh grant is only valid for guardian_request.');
     }
     if (!grant.expiresAt.isAfter(observedAt)) {
       throw ArgumentError('The grant must expire after observedAt.');
     }
   }
 
-  static const schemaVersion = '2.1';
+  ContentContext.deferred({
+    required this.eventId,
+    required this.trigger,
+    required ContentReference contentReference,
+    required this.viewState,
+    required this.observedAt,
+  }) : grant = null,
+       // Keep the public constructor parameter separate from the private field.
+       // ignore: prefer_initializing_formals
+       _contentReference = contentReference {
+    _validateEventId(eventId);
+    if (trigger == ContextTrigger.guardianRequest) {
+      throw ArgumentError('guardian_request requires a fresh grant.');
+    }
+  }
+
+  static const schemaVersion = '2.2';
   static const sourceApp = 'mimotrust_controlled_content';
   static const providerId = 'mimotrust_sandbox';
   static const applicationId = 'com.mimotrust.controlledcontent';
@@ -200,9 +216,13 @@ class ContentContext {
 
   final String eventId;
   final ContextTrigger trigger;
-  final ContentGrant grant;
+  final ContentGrant? grant;
+  final ContentReference? _contentReference;
   final ContentViewState viewState;
   final DateTime observedAt;
+
+  ContentReference get contentReference =>
+      grant?.contentReference ?? _contentReference!;
 
   Map<String, Object> toJson() => <String, Object>{
     'schema_version': schemaVersion,
@@ -213,8 +233,9 @@ class ContentContext {
       'provider_id': providerId,
       'application_id': applicationId,
     },
-    'content_ref': grant.contentReference.toJson(),
-    'content_access': grant.accessJson(),
+    'content_ref': contentReference.toJson(),
+    'content_access':
+        grant?.accessJson() ?? const <String, Object>{'mode': 'deferred_grant'},
     'view_state': viewState.toJson(),
     'observed_at': observedAt.toUtc().toIso8601String(),
   };
@@ -225,5 +246,14 @@ class ContentContext {
       throw StateError('Content Context exceeds 32 KB.');
     }
     return encoded;
+  }
+
+  static void _validateEventId(String value) {
+    if (!RegExp(
+      r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+      caseSensitive: false,
+    ).hasMatch(value)) {
+      throw ArgumentError.value(value, 'eventId');
+    }
   }
 }

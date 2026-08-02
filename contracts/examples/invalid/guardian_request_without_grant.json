@@ -1,7 +1,7 @@
 {
   "schema_version": "2.2",
   "event_id": "2ce1c877-0245-4c31-9fd8-a39bd76900d1",
-  "trigger": "comment",
+  "trigger": "guardian_request",
   "source_app": "mimotrust_controlled_content",
   "provider": {
     "provider_id": "mimotrust_sandbox",
@@ -20,5 +20,5 @@
     "duration_ms": 22467,
     "is_playing": true
   },
-  "observed_at": "2026-08-01T20:00:00+08:00"
+  "observed_at": "2026-08-02T20:00:00+08:00"
 }

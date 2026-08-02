@@ -11,9 +11,11 @@ video-001
   -> 下载 OSS 视频并校验 SHA-256
   -> 拒绝重复兑换
   -> Flutter 播放和本地互动
-  -> comment/share 申请 grant 并生成 Context 2.1
-  -> MethodChannel
-  -> Kotlin 显式广播到 com.mimotrust.guardian
+  -> comment/share 生成 Context 2.2 deferred_grant 候选
+  -> Kotlin 显式广播到 com.mimotrust.guardian，使悬浮球提示
+  -> 悬浮球发送 REQUEST_CONTENT_CONTEXT(request_id)
+  -> 前台沙盒快照当前状态并申请新鲜 grant
+  -> 返回 guardian_request Context 2.2
 ```
 
 Android App 还会通过公开只读 `GET /v1/feed` 获取 ECS 运行时 registry，支持
@@ -23,7 +25,8 @@ Android App 还会通过公开只读 `GET /v1/feed` 获取 ECS 运行时 registr
 
 文章、图文和画廊在 Feed 中使用不可滚动的预览页，点击后进入独立详情。阅读页保存滚动
 位置和实际可见图文块；画廊保存图片下标，缩放时锁定切图，图文图片可进入全屏查看。
-进入详情、阅读、切图和缩放均不发送 Context，仍只有评论和转发面板触发 Context 2.1。
+进入详情、阅读、切图和缩放均不主动发送 Context。评论和转发面板只发送候选；用户点击
+Guardian 悬浮球后，沙盒才响应当前内容并申请一次性 grant。
 
 目录：
 

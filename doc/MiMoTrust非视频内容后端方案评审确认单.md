@@ -33,8 +33,8 @@
 | 三视频沙盒 | 已实现并真机验证 |
 | 阿里云 Debug 网关 | 已部署，`http://47.94.58.72` |
 | Manifest Schema | 当前 `1.0` |
-| Context 2.1 | 当前 APK 已实现，只支持 `comment/share` 发送路径 |
-| Context 2.2 | 目标合同已批准，Schema、样例和代码尚未迁移 |
+| Context 2.2 | 当前沙盒 APK 已实现候选和主动请求；Guardian 非视频消费待实现 |
+| Context 2.2 | 沙盒 Schema、样例、代码和 Debug APK 已迁移；Guardian 非视频消费待实现 |
 | 非视频 Context 样例 | 已有 2.1 样例 |
 | 非视频 Manifest/registry | `article-001/v1` 已发布；其余类型等待真实内容 |
 | 非视频 Flutter 渲染 | 五类模型和渲染器已实现；文章已接入远程 Feed |

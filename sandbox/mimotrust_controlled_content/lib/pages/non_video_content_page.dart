@@ -10,6 +10,7 @@ import '../models/sandbox_comment.dart';
 import '../models/sandbox_content.dart';
 import '../services/content_grant_client.dart';
 import '../services/context_dispatcher.dart';
+import '../services/context_transport.dart';
 import '../services/local_interaction_store.dart';
 import '../widgets/comments_sheet.dart';
 import '../widgets/share_sheet.dart';
@@ -51,6 +52,7 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
   late final List<GlobalKey> _richBlockKeys;
   late final ContextDispatcher _contextDispatcher;
   late final bool _ownsContextDispatcher;
+  late final GuardianContextRequestHandler _guardianRequestHandler;
   late final http.Client _httpClient;
   late final bool _ownsHttpClient;
   AudioPlayer? _audioPlayer;
@@ -105,9 +107,13 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
             ),
           ),
         );
+    _guardianRequestHandler = _handleGuardianRequest;
     _ownsHttpClient = widget.httpClient == null;
     _httpClient = widget.httpClient ?? http.Client();
     WidgetsBinding.instance.addObserver(this);
+    if (widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    }
     unawaited(_loadInteractions());
     if (widget.content case final ArticleContent article) {
       unawaited(_loadArticle(article));
@@ -124,6 +130,13 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
   @override
   void didUpdateWidget(covariant NonVideoContentPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive != widget.isActive) {
+      if (widget.isActive) {
+        GuardianRequestBridge.activate(_guardianRequestHandler);
+      } else {
+        GuardianRequestBridge.deactivate(_guardianRequestHandler);
+      }
+    }
     if (widget.content is AudioContent && oldWidget.isActive != widget.isActive) {
       unawaited(_syncAudioActiveState());
     }
@@ -390,6 +403,20 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
     }
   }
 
+  Future<void> _handleGuardianRequest(String requestId) async {
+    if (!mounted ||
+        !widget.isActive ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      throw StateError('No foreground active content.');
+    }
+    await _contextDispatcher.dispatchGuardianRequest(
+      requestId: requestId,
+      content: widget.content,
+      viewState: _currentViewState(),
+      observedAt: DateTime.now().toUtc(),
+    );
+  }
+
   Future<void> _openImage(Uri imageUrl) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -400,6 +427,13 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      GuardianRequestBridge.deactivate(_guardianRequestHandler);
+    } else if (state == AppLifecycleState.resumed && widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    }
     final player = _audioPlayer;
     if (player == null) return;
     if (state != AppLifecycleState.resumed) {
@@ -410,6 +444,7 @@ class _NonVideoContentPageState extends State<NonVideoContentPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    GuardianRequestBridge.deactivate(_guardianRequestHandler);
     if (_readingController.hasClients) {
       widget.onReadingOffsetChanged?.call(_readingController.offset);
     }

@@ -47,10 +47,38 @@ class ContextDispatcher {
       contentHash: content.hash,
       canonicalUrl: content.canonicalUrl,
     );
-    final grant = await _grantClient.issueGrant(reference);
-    final context = ContentContext(
+    if (trigger == ContextTrigger.guardianRequest) {
+      throw ArgumentError('Use dispatchGuardianRequest for active requests.');
+    }
+    final context = ContentContext.deferred(
       eventId: _eventIdGenerator(),
       trigger: trigger,
+      contentReference: reference,
+      viewState: viewState,
+      observedAt: observation,
+    );
+    await _transport.send(context);
+    return context;
+  }
+
+  Future<ContentContext> dispatchGuardianRequest({
+    required String requestId,
+    required SandboxContent content,
+    required ContentViewState viewState,
+    DateTime? observedAt,
+  }) async {
+    final observation = (observedAt ?? _clock()).toUtc();
+    final reference = ContentReference(
+      contentType: content.contentType,
+      contentId: content.id,
+      contentVersion: content.version,
+      contentHash: content.hash,
+      canonicalUrl: content.canonicalUrl,
+    );
+    final grant = await _grantClient.issueGrant(reference);
+    final context = ContentContext(
+      eventId: requestId,
+      trigger: ContextTrigger.guardianRequest,
       grant: grant,
       viewState: viewState,
       observedAt: observation,
