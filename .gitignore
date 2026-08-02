@@ -13,3 +13,12 @@ android/.kotlin/
 android/app/build/
 sandbox/content_gateway/*.log
 android/.idea/
+
+# Internal docs and test assets (local only)
+doc/
+txt_info/
+图文/
+video_info/
+contracts/
+scripts/
+sandbox/tools/
