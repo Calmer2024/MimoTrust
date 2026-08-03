@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'models/video_content.dart';
+import 'models/sandbox_content.dart';
 import 'pages/video_content_page.dart';
 import 'services/content_repository.dart';
 
 typedef FeaturedVideoLoader = Future<VideoContent> Function();
 typedef VideoFeedLoader = Future<List<VideoContent>> Function();
+typedef ContentFeedLoader = Future<List<SandboxContent>> Function();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,11 +20,13 @@ class MiMoTrustApp extends StatelessWidget {
     super.key,
     this.loadVideoFeed,
     this.loadFeaturedVideo,
+    this.loadContentFeed,
     this.videoBuilder,
   });
 
   final VideoFeedLoader? loadVideoFeed;
   final FeaturedVideoLoader? loadFeaturedVideo;
+  final ContentFeedLoader? loadContentFeed;
   final VideoPageBuilder? videoBuilder;
 
   @override
@@ -45,13 +48,16 @@ class MiMoTrustApp extends StatelessWidget {
       ),
       home: VideoContentPage(
         loadContents: () async {
+          if (loadContentFeed != null) {
+            return loadContentFeed!();
+          }
           if (loadVideoFeed != null) {
             return loadVideoFeed!();
           }
           if (loadFeaturedVideo != null) {
             return <VideoContent>[await loadFeaturedVideo!()];
           }
-          return repository.loadVideoFeed();
+          return repository.loadContentFeed();
         },
         videoBuilder: videoBuilder,
       ),

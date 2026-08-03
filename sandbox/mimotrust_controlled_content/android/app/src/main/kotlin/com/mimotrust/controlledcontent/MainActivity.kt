@@ -18,9 +18,12 @@ class MainActivity : FlutterActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != REQUEST_ACTION) return
             val requestId = intent.getStringExtra(REQUEST_ID_EXTRA).orEmpty()
-            if (!UUID_PATTERN.matches(requestId)) return
+            if (!UUID_PATTERN.matches(requestId)) {
+                Log.w(LOG_TAG, "CONTENT_CONTEXT_REQUEST_REJECTED reason=invalid_request_id")
+                return
+            }
             channel?.invokeMethod(METHOD_REQUEST_CURRENT_CONTEXT, requestId)
-            Log.i(LOG_TAG, "CONTENT_CONTEXT_REQUEST request_id=$requestId")
+            Log.i(LOG_TAG, "CONTENT_CONTEXT_REQUEST_RECEIVED request_id=$requestId")
         }
     }
 

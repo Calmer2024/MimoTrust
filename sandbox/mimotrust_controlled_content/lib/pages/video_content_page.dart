@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import '../models/content_context.dart';
 import '../models/sandbox_comment.dart';
+import '../models/sandbox_content.dart';
 import '../models/video_content.dart';
 import '../services/content_grant_client.dart';
 import '../services/context_dispatcher.dart';
@@ -14,6 +15,8 @@ import '../services/local_interaction_store.dart';
 import '../services/playback_lifecycle_policy.dart';
 import '../widgets/comments_sheet.dart';
 import '../widgets/share_sheet.dart';
+import 'content_preview_page.dart';
+import 'non_video_content_page.dart';
 
 typedef VideoPageBuilder = Widget Function(VideoContent content);
 
@@ -24,28 +27,82 @@ class VideoContentPage extends StatefulWidget {
     this.videoBuilder,
   });
 
-  final Future<List<VideoContent>> Function() loadContents;
+  final Future<List<SandboxContent>> Function() loadContents;
   final VideoPageBuilder? videoBuilder;
 
   @override
   State<VideoContentPage> createState() => _VideoContentPageState();
 }
 
-class _VideoContentPageState extends State<VideoContentPage> {
-  late Future<List<VideoContent>> _contents;
+class _VideoContentPageState extends State<VideoContentPage>
+    with WidgetsBindingObserver {
+  late Future<List<SandboxContent>> _contents;
+  final PageController _feedController = PageController();
+  final Map<String, double> _readingOffsets = <String, double>{};
+  final Map<String, int> _galleryIndexes = <String, int>{};
   int _activeIndex = 0;
+  bool _wasBackgrounded = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _contents = widget.loadContents();
   }
 
   void _retry() {
     setState(() {
-      _activeIndex = 0;
       _contents = widget.loadContents();
     });
+  }
+
+  void _restoreActivePage(int itemCount) {
+    final target = _activeIndex.clamp(0, itemCount - 1);
+    _activeIndex = target;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_feedController.hasClients) return;
+      final current = _feedController.page?.round();
+      if (current != target) _feedController.jumpToPage(target);
+    });
+  }
+
+  Future<void> _openDetails(SandboxContent content) async {
+    final contentKey = '${content.id}:${content.version}';
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => NonVideoContentPage(
+          content: content,
+          isActive: true,
+          isDetail: true,
+          initialReadingOffset: _readingOffsets[contentKey] ?? 0,
+          initialGalleryIndex: _galleryIndexes[contentKey] ?? 0,
+          onReadingOffsetChanged: (offset) {
+            _readingOffsets[contentKey] = offset;
+          },
+          onGalleryIndexChanged: (index) {
+            _galleryIndexes[contentKey] = index;
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      _wasBackgrounded = true;
+    } else if (state == AppLifecycleState.resumed && _wasBackgrounded) {
+      _wasBackgrounded = false;
+      _retry();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _feedController.dispose();
+    super.dispose();
   }
 
   @override
@@ -55,36 +112,69 @@ class _VideoContentPageState extends State<VideoContentPage> {
         statusBarColor: Colors.transparent,
         systemNavigationBarColor: Colors.black,
       ),
-      child: FutureBuilder<List<VideoContent>>(
+      child: FutureBuilder<List<SandboxContent>>(
         future: _contents,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const _ContentStatusView.loading();
           }
-          if (snapshot.hasError ||
-              !snapshot.hasData ||
-              snapshot.data!.isEmpty) {
+          if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
             return _ContentStatusView.error(onRetry: _retry);
           }
           final contents = snapshot.requireData;
-          return PageView.builder(
-            key: const Key('video-feed'),
-            scrollDirection: Axis.vertical,
-            itemCount: contents.length,
-            onPageChanged: (index) {
-              setState(() {
-                _activeIndex = index;
-              });
-            },
-            itemBuilder: (context, index) {
-              final content = contents[index];
-              return widget.videoBuilder?.call(content) ??
-                  NetworkVideoPage(
+          _restoreActivePage(contents.length);
+          return Stack(
+            children: [
+              PageView.builder(
+                key: const Key('video-feed'),
+                controller: _feedController,
+                scrollDirection: Axis.vertical,
+                itemCount: contents.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _activeIndex = index;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final content = contents[index];
+                  if (content is VideoContent) {
+                    return widget.videoBuilder?.call(content) ??
+                        NetworkVideoPage(
+                          key: ValueKey('${content.id}:${content.version}'),
+                          content: content,
+                          isActive: index == _activeIndex,
+                        );
+                  }
+                  if (content is AudioContent) {
+                    return NonVideoContentPage(
+                      key: ValueKey('${content.id}:${content.version}'),
+                      content: content,
+                      isActive: index == _activeIndex,
+                    );
+                  }
+                  return ContentPreviewPage(
                     key: ValueKey('${content.id}:${content.version}'),
                     content: content,
                     isActive: index == _activeIndex,
+                    onOpen: () => _openDetails(content),
                   );
-            },
+                },
+              ),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 6, right: 10),
+                    child: IconButton.filledTonal(
+                      key: const Key('refresh-feed'),
+                      tooltip: '刷新内容',
+                      onPressed: _retry,
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -160,7 +250,8 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.content.videoUrl != widget.content.videoUrl) {
       unawaited(_initialize());
-    } else if (oldWidget.isActive != widget.isActive) {
+    }
+    if (oldWidget.isActive != widget.isActive) {
       if (widget.isActive) {
         GuardianRequestBridge.activate(_guardianRequestHandler);
       } else {
@@ -389,8 +480,9 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
   }
 
   void _requestContext(ContextTrigger trigger) {
-    final viewState = _currentViewState();
-    unawaited(_dispatchContext(trigger, viewState, DateTime.now().toUtc()));
+    unawaited(
+      _dispatchContext(trigger, _currentViewState(), DateTime.now().toUtc()),
+    );
   }
 
   MediaViewState _currentViewState() {
@@ -444,13 +536,19 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      GuardianRequestBridge.deactivate(_guardianRequestHandler);
+    } else if (state == AppLifecycleState.resumed && widget.isActive) {
+      GuardianRequestBridge.activate(_guardianRequestHandler);
+    }
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) {
       return;
     }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      GuardianRequestBridge.deactivate(_guardianRequestHandler);
       _playbackLifecycle.recordInterruption(
         wasPlaying: controller.value.isPlaying,
       );
@@ -459,9 +557,6 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
       _playbackLifecycle.clear();
       unawaited(controller.pause());
     } else if (state == AppLifecycleState.resumed) {
-      if (widget.isActive) {
-        GuardianRequestBridge.activate(_guardianRequestHandler);
-      }
       if (widget.isActive && _playbackLifecycle.consumeResumeRequest()) {
         unawaited(controller.play());
       }
@@ -499,7 +594,22 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
         children: [
           ColoredBox(
             color: Colors.black,
-            child: Image.asset(
+            child: widget.content.coverUrl != null
+                ? Image.network(
+                    widget.content.coverUrl.toString(),
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const ColoredBox(
+                          color: Color(0xFF111111),
+                          child: Center(
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              size: 42,
+                            ),
+                          ),
+                        ),
+                  )
+                : Image.asset(
               widget.content.coverAssetPath,
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => const ColoredBox(
@@ -508,7 +618,7 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
                   child: Icon(Icons.image_not_supported_outlined, size: 42),
                 ),
               ),
-            ),
+                  ),
           ),
           if (initialized)
             GestureDetector(
@@ -582,7 +692,8 @@ class _NetworkVideoPageState extends State<NetworkVideoPage>
                   widget.content.displayMetrics.commentCount +
                   _localComments.length,
               shareCount:
-                  widget.content.displayMetrics.shareCount + _sessionShareCount,
+                  widget.content.displayMetrics.shareCount +
+                  _sessionShareCount,
               onLike: _toggleLiked,
               onComment: _openComments,
               onShare: _openShare,

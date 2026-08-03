@@ -1,0 +1,24 @@
+[Unit]
+Description=sandbox Developer Content Admin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mimotrust
+Group=mimotrust
+WorkingDirectory=/opt/MimoTrust
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=/etc/mimotrust-content-admin.env
+ExecStart=/opt/MimoTrust/.venv/bin/python -m sandbox.content_admin.server --host 127.0.0.1 --port 8788 --registry /var/lib/mimotrust/content_registry/registry.json --drafts /var/lib/mimotrust/content-admin/drafts
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mimotrust
+
+[Install]
+WantedBy=multi-user.target
+

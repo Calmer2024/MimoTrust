@@ -13,10 +13,15 @@ python -m sandbox.content_gateway.server --host 127.0.0.1 --port 8787
 
 ```text
 GET  /health
+GET  /v1/feed                    # App 公开只读内容目录，不签发 grant
 POST /v1/context-grants
 POST /v1/grants/exchange
 GET  /assets/...                 # 本地演示资产读取
 ```
+
+`/v1/feed` 只返回活动内容，按 `display_order` 排序，并携带 Manifest 1.0 和界面计数。
+响应时会把 Manifest 中指向 `127.0.0.1` 的本地演示资源 URL 外化为网关公网基址；磁盘上的
+Manifest 不会被修改。grant 兑换响应使用同样的 URL 外化规则。
 
 申请 grant：
 
@@ -59,6 +64,7 @@ Python 服务：127.0.0.1:8787
 ```
 
 公网验证已通过健康检查、grant 签发、一次兑换、视频下载、SHA-256 校验和重放拒绝。
-当前仅用于三视频 Debug 联调；`8787` 不对公网开放，grant 仍为进程内存状态，因此不得
+当前运行时 registry 为 7 条内容：4 个视频、1 篇文章、1 篇图文和 1 个图集；音频尚无
+真实素材。`8787` 不对公网开放，grant 仍为进程内存状态，因此不得
 扩展为多实例。正式演示前必须配置 HTTPS 域名，生产化前必须将 grant 迁移到支持原子
 单次兑换的共享存储。

@@ -70,6 +70,57 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('video-003:').hitTestable(), findsOneWidget);
   });
+
+  testWidgets('refresh keeps the current Feed page', (tester) async {
+    var attempts = 0;
+    await tester.pumpWidget(
+      MiMoTrustApp(
+        loadVideoFeed: () async {
+          attempts += 1;
+          return <VideoContent>[
+            _videoFixture(id: 'video-001', title: '视频一'),
+            _videoFixture(id: 'video-002', title: '视频二'),
+            _videoFixture(id: 'video-003', title: '视频三'),
+          ];
+        },
+        videoBuilder: (content) => Material(
+          child: Center(child: Text('${content.id}:${content.title}')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(find.byKey(const Key('video-feed')), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('video-002:').hitTestable(), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('refresh-feed')));
+    await tester.pumpAndSettle();
+
+    expect(attempts, 2);
+    expect(find.textContaining('video-002:').hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('rich article preview opens a separate reader and returns', (
+    tester,
+  ) async {
+    final article = _richArticleFixture();
+    await tester.pumpWidget(
+      MiMoTrustApp(loadContentFeed: () async => <SandboxContent>[article]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('rich-article-scroll')), findsNothing);
+    expect(find.byKey(const Key('open-content-rich-001')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('open-content-rich-001')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('rich-article-scroll')), findsOneWidget);
+    expect(find.byKey(const Key('content-detail-back')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('content-detail-back')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('open-content-rich-001')), findsOneWidget);
+  });
 }
 
 VideoContent _videoFixture({String id = 'video-001', String title = '测试视频'}) {
@@ -88,5 +139,25 @@ VideoContent _videoFixture({String id = 'video-001', String title = '测试视�
     duration: const Duration(seconds: 22),
     width: 720,
     height: 1280,
+  );
+}
+
+RichArticleContent _richArticleFixture() {
+  return RichArticleContent(
+    id: 'rich-001',
+    version: 'v1',
+    hash: List<String>.filled(64, 'a').join(),
+    title: '测试图文',
+    author: '测试作者',
+    publishedAt: '2026-08-02T00:00:00+08:00',
+    canonicalUrl: Uri.parse(
+      'https://sandbox.mimotrust.local/content/rich-001',
+    ),
+    assets: const <ContentAsset>[],
+    displayMetrics: const ContentDisplayMetrics.zero(),
+    blocks: const <RichArticleBlock>[
+      RichArticleBlock(index: 0, type: 'text', text: '第一段图文正文'),
+      RichArticleBlock(index: 1, type: 'text', text: '第二段图文正文'),
+    ],
   );
 }

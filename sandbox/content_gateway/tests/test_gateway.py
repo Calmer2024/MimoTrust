@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from pathlib import Path
 
 from sandbox.content_gateway.server import (
     AUDIENCE,
@@ -115,6 +117,42 @@ class GrantServiceTests(unittest.TestCase):
             self.assertEqual(content_id, issued["content_ref"]["content_id"])
 
 
+class ContentStoreReloadTests(unittest.TestCase):
+    def test_registry_changes_are_loaded_without_restarting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifests = root / "manifests"
+            manifests.mkdir()
+            source_manifest = DEFAULT_REGISTRY.parent / "manifests" / "video-001.v1.json"
+            (manifests / "video-001.v1.json").write_bytes(source_manifest.read_bytes())
+            registry = {
+                "registry_version": "1.0",
+                "provider_id": "mimotrust_sandbox",
+                "updated_at": "2026-08-02T00:00:00Z",
+                "contents": [],
+            }
+            registry_path = root / "registry.json"
+            registry_path.write_text(json.dumps(registry), encoding="utf-8")
+            store = ContentStore(registry_path)
+            self.assertEqual(0, store.content_count)
+
+            registry["contents"].append(
+                {
+                    "content_id": "video-001",
+                    "content_version": "v1",
+                    "content_type": "video",
+                    "status": "active",
+                    "display_order": 0,
+                    "manifest_path": "manifests/video-001.v1.json",
+                    "display_metrics": {"like_count": 0, "comment_count": 0, "share_count": 0},
+                }
+            )
+            registry["updated_at"] = "2026-08-02T00:00:01Z"
+            registry_path.write_text(json.dumps(registry) + "\n", encoding="utf-8")
+            self.assertEqual(1, store.content_count)
+            self.assertEqual("video-001", store.get_manifest("video-001", "v1")["content"]["content_id"])
+
+
 class HttpGatewayTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -158,6 +196,38 @@ class HttpGatewayTests(unittest.TestCase):
         self.assertEqual(HTTPStatus.GONE, caught.exception.code)
         error = json.load(caught.exception)
         self.assertEqual("GRANT_REPLAYED", error["error"]["code"])
+
+    def test_feed_is_ordered_and_materializes_local_asset_urls(self):
+        status, feed = self.request_json("/v1/feed")
+
+        self.assertEqual(HTTPStatus.OK, status)
+        self.assertEqual("1.0", feed["registry_version"])
+        self.assertEqual("mimotrust_sandbox", feed["provider_id"])
+        self.assertEqual(
+            ["video-001", "video-002", "video-003"],
+            [item["content_id"] for item in feed["contents"]],
+        )
+        first_assets = feed["contents"][0]["manifest"]["assets"]
+        cover = next(asset for asset in first_assets if asset["role"] == "cover")
+        self.assertEqual(
+            f"{self.base_url}/assets/images/video-001-cover.png",
+            cover["source_url"],
+        )
+
+    def test_exchange_materializes_local_asset_urls(self):
+        _, issued = self.request_json("/v1/context-grants", "POST", grant_request())
+        _, exchanged = self.request_json(
+            "/v1/grants/exchange", "POST", exchange_request(issued["grant_code"])
+        )
+        cover = next(
+            asset
+            for asset in exchanged["manifest"]["assets"]
+            if asset["role"] == "cover"
+        )
+        self.assertEqual(
+            f"{self.base_url}/assets/images/video-001-cover.png",
+            cover["source_url"],
+        )
 
     def test_local_cover_asset_is_served(self):
         with urlopen(self.base_url + "/assets/images/video-001-cover.png", timeout=3) as response:

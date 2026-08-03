@@ -1,7 +1,7 @@
 import 'package:uuid/uuid.dart';
 
 import '../models/content_context.dart';
-import '../models/video_content.dart';
+import '../models/sandbox_content.dart';
 import 'content_grant_client.dart';
 import 'context_transport.dart';
 
@@ -25,14 +25,31 @@ class ContextDispatcher {
     required MediaViewState viewState,
     DateTime? observedAt,
   }) async {
+    return dispatchContext(
+      trigger: trigger,
+      content: content,
+      viewState: viewState,
+      observedAt: observedAt,
+    );
+  }
+
+  Future<ContentContext> dispatchContext({
+    required ContextTrigger trigger,
+    required SandboxContent content,
+    required ContentViewState viewState,
+    DateTime? observedAt,
+  }) async {
     final observation = (observedAt ?? _clock()).toUtc();
     final reference = ContentReference(
-      contentType: 'video',
+      contentType: content.contentType,
       contentId: content.id,
       contentVersion: content.version,
       contentHash: content.hash,
       canonicalUrl: content.canonicalUrl,
     );
+    if (trigger == ContextTrigger.guardianRequest) {
+      throw ArgumentError('Use dispatchGuardianRequest for active requests.');
+    }
     final context = ContentContext.deferred(
       eventId: _eventIdGenerator(),
       trigger: trigger,
@@ -46,13 +63,13 @@ class ContextDispatcher {
 
   Future<ContentContext> dispatchGuardianRequest({
     required String requestId,
-    required VideoContent content,
-    required MediaViewState viewState,
+    required SandboxContent content,
+    required ContentViewState viewState,
     DateTime? observedAt,
   }) async {
     final observation = (observedAt ?? _clock()).toUtc();
     final reference = ContentReference(
-      contentType: 'video',
+      contentType: content.contentType,
       contentId: content.id,
       contentVersion: content.version,
       contentHash: content.hash,

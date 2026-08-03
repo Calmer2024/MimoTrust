@@ -10,4 +10,5 @@
 - registry 中的 `display_metrics` 只用于沙盒互动数量展示，不属于 Manifest 或 Context；
 - 后期自动上架时可替换注册表加载器，但保持 Manifest 1.0 和 grant 合同不变。
 
-内容上传不在本目录执行。现阶段资源仍由开发者在 OSS 控制台手工上传。
+开发者可以使用 `sandbox/content_admin/` 将资源上传 OSS，并在完整校验后原子更新部署环境
+的运行时副本。Git 中的本目录仍作为初始种子和合同夹具，不直接承载 ECS 上的动态数据。

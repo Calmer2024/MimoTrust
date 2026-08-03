@@ -1,8 +1,9 @@
 # MiMoTrust 受控内容沙盒实施合同
 
-> 状态：Context 2.2 已实现并完成真机端到端验收
+> 状态：已冻结  
 > 日期：2026-08-02
 > 当前实现依据：《MiMoTrust 受控内容沙盒跨系统协作文档》Context 2.2
+> 实施状态：沙盒代码、Schema、样例、测试和 Debug APK 已迁移；双向真机联调待完成
 
 ## 固定标识
 
@@ -20,7 +21,7 @@
 | source_app | `mimotrust_controlled_content` |
 
 Flutter 与 Kotlin 之间使用内部方法 `sendContentContext`，参数是单个已序列化的
-Context 2.1 JSON 字符串。该方法只属于 App 内部桥接，不新增外部协议；Kotlin 不重组
+Context 2.2 JSON 字符串。该方法只属于 App 内部桥接，不新增外部协议；Kotlin 不重组
 Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 
 不得引入第二套包名、Action、Extra、Schema 或字段语义。
@@ -28,12 +29,15 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 ## 固定行为
 
 - 内容类型为 `video`、`audio`、`article`、`rich_article`、`image_gallery`；
-- 只有打开评论面板时发送 `comment`，打开转发面板时发送 `share`；
+- 打开评论面板时发送 `comment` 候选，打开转发面板时发送 `share` 候选；
+- 用户点击守护者悬浮球后，前台沙盒响应 `guardian_request`；
 - 浏览、播放、切页、页面停留、进入后台和恢复前台均不发送上下文；
 - Payload 不包含评论正文、联系人、用户稳定标识、Cookie、长期凭据或媒体二进制；
-- 广播为显式、单向、尽力交付，不提供业务 ACK；
+- 两个方向均使用显式、尽力交付广播，不提供业务 ACK；
 - 守护者、网关或媒体不可用时，沙盒继续浏览和互动；
-- 内容全部由开发者在 OSS 控制台手工上传，项目不提供任何上传能力。
+- 普通用户不具备上传能力；开发者可通过独立的 `content_admin` 管理服务规范化上传，
+  服务端生成并校验 Manifest 1.0 后更新运行时 registry。该管理服务不属于 Android App，
+  不改变 Context、grant 或跨 App 协议。
 
 ## Android 基线
 
@@ -49,11 +53,12 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 - 音频素材尚未提供，注册表中只能标为 `pending_asset`，不得生成伪造的有效 Manifest；
 - 原始素材不移动、不覆盖，沙盒只保存用于固定演示快照的副本。
 
-## Context 2.2 主动请求合同（已实现）
+## 当前合同：Context 2.2
 
-本节描述当前实现。Debug 联调暂不启用 signature 权限；正式签名统一后必须恢复权限保护。
+以下行为已在沙盒代码、合同测试、Flutter 测试和 Debug APK 中实现；真实 Guardian 双向
+广播、超时和后端资源读取仍需真机验收。
 
-| 项目 | 目标值 |
+| 项目 | 固定值 |
 |---|---|
 | 守护者请求 Action | `com.mimotrust.intent.action.REQUEST_CONTENT_CONTEXT` |
 | 请求目标包 | `com.mimotrust.controlledcontent` |
@@ -64,7 +69,7 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 | Context Schema | `2.2` |
 | 主动请求 trigger | `guardian_request` |
 
-目标行为：
+当前行为：
 
 - 普通浏览、播放、切页和停留仍不发送跨 App 消息；Flutter 仅在 App 内维护当前内容和查看状态；
 - `comment/share` 发送 `content_access.mode = deferred_grant` 的候选通知，不申请可用 grant；
@@ -73,8 +78,9 @@ Payload，直接使用上表固定的 Action、目标包和 Extra 发送。
 - 沙盒请求 Receiver 只在 `MainActivity` resumed 时动态注册；无前台有效内容时不响应；
 - 沙盒收到请求后快照当前内容/查看状态，申请新鲜 180 秒一次性 grant，并返回 `trigger = guardian_request`、`event_id = request_id` 的 Context 2.2；
 - 守护者以 3–5 秒超时、防抖和 `event_id` 唯一约束处理重复点击/响应；只有 `guardian_request` 响应进入后端队列；
-- 迁移期守护者兼容读取 2.1/2.2，且不得自动消费 2.1 `comment/share` 中的 grant；
+- main 分支 Guardian 当前严格读取 2.2；旧 2.1 APK 与其不兼容，不得混装联调；
 - 悬浮球点击不得伪装成 `comment/share`，不得使用无障碍或屏幕抓取取得第三方 App 内容；
 - 统一签名后，`com.mimotrust.permission.SEND_CONTENT_CONTEXT` 同时保护请求和响应方向；Debug 联调暂不启用。
 
-完成目标迁移时必须同步更新 JSON Schema、正反样例、Dart 模型、Kotlin 双向广播、守护者模型、后端合同和自动化测试，不能只修改版本号。
+当前沙盒五类内容均可生成 2.2 响应，但 main 分支 Guardian 的资源兑换和任务创建仍只支持
+`video`。非视频端到端核验需要继续扩展 Guardian/后端，不能仅以沙盒响应成功作为交付依据。

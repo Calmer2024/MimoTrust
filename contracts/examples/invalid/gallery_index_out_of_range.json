@@ -1,0 +1,20 @@
+{
+  "schema_version": "2.2",
+  "event_id": "9f7e773c-ec62-4702-9db4-797d2f04a855",
+  "trigger": "comment",
+  "source_app": "mimotrust_controlled_content",
+  "provider": {
+    "provider_id": "mimotrust_sandbox",
+    "application_id": "com.mimotrust.controlledcontent"
+  },
+  "content_ref": {
+    "content_type": "image_gallery",
+    "content_id": "gallery-001",
+    "content_version": "v1",
+    "content_hash": "c837d024c301615f5f29df5c3a02da50967a886acef8fd3332d6a650a4d09522",
+    "canonical_url": "https://sandbox.mimotrust.local/content/gallery-001"
+  },
+  "content_access": { "mode": "deferred_grant" },
+  "view_state": { "active_asset_index": 4, "asset_count": 4 },
+  "observed_at": "2026-08-01T20:00:00+08:00"
+}

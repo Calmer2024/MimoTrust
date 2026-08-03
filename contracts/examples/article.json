@@ -1,0 +1,23 @@
+{
+  "schema_version": "2.2",
+  "event_id": "45d44f0c-0ae6-4b83-b1f9-9279e0fc81b5",
+  "trigger": "comment",
+  "source_app": "mimotrust_controlled_content",
+  "provider": {
+    "provider_id": "mimotrust_sandbox",
+    "application_id": "com.mimotrust.controlledcontent"
+  },
+  "content_ref": {
+    "content_type": "article",
+    "content_id": "article-001",
+    "content_version": "v1",
+    "content_hash": "7e254d0de54d4a40167ad88020de49e53b98e532c47c0e6aa0ce096d3870a06a",
+    "canonical_url": "https://sandbox.mimotrust.local/content/article-001"
+  },
+  "content_access": { "mode": "deferred_grant" },
+  "view_state": {
+    "scroll_ratio": 0.42,
+    "block_index": 0
+  },
+  "observed_at": "2026-08-01T20:00:00+08:00"
+}

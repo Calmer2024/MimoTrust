@@ -25,27 +25,31 @@ typedef GuardianContextRequestHandler = Future<void> Function(String requestId);
 class GuardianRequestBridge {
   GuardianRequestBridge._();
 
-  static GuardianContextRequestHandler? _activeHandler;
+  static final List<GuardianContextRequestHandler> _activeHandlers =
+      <GuardianContextRequestHandler>[];
 
   static void activate(GuardianContextRequestHandler handler) {
-    _activeHandler = handler;
-    MethodChannelContextTransport._channel.setMethodCallHandler((call) async {
-      if (call.method != MethodChannelContextTransport.requestMethodName) {
-        throw MissingPluginException('Unsupported method ${call.method}');
-      }
-      final requestId = call.arguments;
-      final active = _activeHandler;
-      if (requestId is! String || requestId.isEmpty || active == null) {
-        throw PlatformException(code: 'NO_ACTIVE_CONTENT');
-      }
-      await active(requestId);
-    });
+    _activeHandlers.remove(handler);
+    _activeHandlers.add(handler);
+    MethodChannelContextTransport._channel.setMethodCallHandler(_handleCall);
   }
 
   static void deactivate(GuardianContextRequestHandler handler) {
-    if (identical(_activeHandler, handler)) {
-      _activeHandler = null;
+    _activeHandlers.remove(handler);
+    if (_activeHandlers.isEmpty) {
       MethodChannelContextTransport._channel.setMethodCallHandler(null);
     }
+  }
+
+  static Future<void> _handleCall(MethodCall call) async {
+    if (call.method != MethodChannelContextTransport.requestMethodName) {
+      throw MissingPluginException('Unsupported method ${call.method}');
+    }
+    final requestId = call.arguments;
+    final active = _activeHandlers.lastOrNull;
+    if (requestId is! String || requestId.isEmpty || active == null) {
+      throw PlatformException(code: 'NO_ACTIVE_CONTENT');
+    }
+    await active(requestId);
   }
 }

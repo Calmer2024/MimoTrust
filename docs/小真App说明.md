@@ -41,6 +41,7 @@ curl -X POST http://127.0.0.1:8000/v1/jobs \
 开发：
 
 ```powershell
+Set-Location backend
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 # 填写 MIMO_API_KEY；MIMO_JOB_MODE 保持 memory
