@@ -1,10 +1,10 @@
 # MiMoTrust 守护者 App 跨系统协作文档
 
-> 状态：Context 2.2 合同已冻结，沙盒迁移完成，双向真机联调待完成
-> 文档版本：0.7
+> 状态：Context 2.2 与真实视频核验真机主链已通过，音频素材与生产部署待完成
+> 文档版本：0.10
 > 当前上下文协议：2.2
 > 当前实施中心：MiMoTrust 守护者 Android App  
-> 更新日期：2026-08-02
+> 更新日期：2026-08-03
 
 本版批准“用户点击守护者悬浮球后，守护者主动向前台沙盒请求当前内容”的双向交互。`comment/share` 只提示候选，不自动获取资源；`guardian_request` 才代表用户明确发起核验。本文中的 2.2 条款覆盖旧版关于 `comment/share` 自动入队、自动兑换或单向链路的描述。
 
@@ -34,14 +34,17 @@ MiMoTrust 受控内容沙盒只用于验证“平台在用户授权后向守护�
 |---|---|
 | 业务边界和演示场景 | 已冻结 |
 | `com.mimotrust.*` 命名、Manifest 1.0 | 已冻结并已实现 |
-| Context 2.2 | 沙盒已实现；6 个合法、7 个非法样例通过合同测试 |
-| Context 2.2 主动请求 | 沙盒 Receiver、状态快照、deferred grant 和 Debug APK 已完成；真机待验收 |
-| 内容数据 | 云端 Feed 当前有视频、文章、图文和图集；音频待真实素材 |
-| 受控内容 App | 五类 Flutter Android App 已构建；2.2 双向链路待真机验证 |
-| 平台内容网关 | 本地 Mock 已完成；180 秒内存 grant、一次兑换 |
-| 守护者 App/后端 | main 已实现视频请求、兑换和任务流程；双向真机与非视频待完成 |
+| Context 2.2 | 沙盒与小真均严格实现；6 个合法、7 个非法样例通过合同测试 |
+| Context 2.2 主动请求 | 双向广播、状态快照、deferred grant 和新鲜 grant 已实现并通过真机验收 |
+| 内容数据 | 阿里云 Feed 当前有 7 条：4 个视频、1 篇文章、1 篇图文、1 个图集；音频待真实素材 |
+| 受控内容 App | 五类 Flutter Android 展示与状态快照已构建；视频、文章、图文和图集已真机闭环 |
+| 平台内容网关 | 阿里云 ECS 已部署；180 秒内存 grant、一次兑换，健康检查正常 |
+| 小真 App | 严格校验 2.2；候选只提示；主动响应通过唯一 WorkManager 可靠提交 |
+| 小真后端 | 已实现 `POST /v1/content-contexts`、后端兑换 grant、Manifest 校验和五类内容解析 |
 
-因此，守护者 App 当前不应等待沙盒完成后再开发。守护者组先使用固定 JSON 样例、ADB 测试广播和可替换的假后端完成接收链路；沙盒完成后只替换测试输入，不修改守护者核心逻辑。
+当前代码已按本合同联通，候选提示、主动请求、响应、唯一入队、后端兑换和任务结果已在
+Xiaomi Android 16 真机跑通。后续不再把 grant 兑换或 Manifest 解析移回 Android
+Receiver。云端尚无音频素材，因此音频先以合同和自动化测试验收，待素材上传后补做真机闭环。
 
 ### 1.3 沙盒最终只需提供的能力
 
@@ -234,7 +237,7 @@ Intent("com.mimotrust.intent.action.CONTENT_CONTEXT")
 
 | 字段 | 约束 |
 |---|---|
-| `schema_version` | 目标为 `2.2`；迁移期守护者兼容读取 `2.1` |
+| `schema_version` | 固定为 `2.2`；当前实现不接收旧 `2.1` |
 | `event_id` | 每次事件唯一 UUID；`guardian_request` 时等于请求 `request_id` |
 | `trigger` | `comment/share/guardian_request` |
 | `provider` | 内容提供方身份 |
@@ -475,8 +478,7 @@ provider_id
 
 ## 12. 协议兼容与变更规则
 
-- 迁移期守护者必须同时接受 Context 2.1 和 2.2；发送端迁移完成后默认发送 2.2；
-- Context 2.1 `comment/share` 中即使存在 `grant_exchange` 也只按候选处理，不自动上传、兑换或下载；
+- 沙盒与小真只发送和接收 Context 2.2；旧 2.1 已退出当前工程合同；
 - 不得把悬浮球点击映射或伪装为 `comment/share`；
 - 增加可选字段可保持 `2.x`；
 - 删除字段、修改语义或字段类型必须升级主版本；
@@ -548,7 +550,7 @@ HASH_MISMATCH
 2. 实现用户授权、悬浮窗权限引导、前台服务和通知入口降级；
 3. 实现悬浮球六态 UI、点击防抖、`request_id` 和 3–5 秒超时；
 4. 实现 `REQUEST_CONTENT_CONTEXT` 显式广播和响应 Receiver 最小日志；
-5. 实现 Context 2.2 模型、校验、错误码，并兼容读取 2.1；
+5. 实现 Context 2.2 模型、校验和错误码，拒绝旧 2.1；
 6. 区分候选与请求响应：`comment/share` 只保存候选，`guardian_request` 才可靠入队；
 7. 实现 `event_id/request_id` 唯一约束和唯一 WorkManager；
 8. 接入 `POST /v1/content-contexts`、固定假响应和状态界面；
@@ -562,7 +564,7 @@ HASH_MISMATCH
 ### 15.1 守护者 App 单独验收
 
 1. 悬浮球和通知入口能发出带 UUID `request_id` 的固定显式请求；
-2. 合法 2.2 响应和迁移期 2.1 候选均能被 Receiver 接收；
+2. 合法 2.2 响应能被 Receiver 接收，旧 2.1 和非法 2.2 被拒绝；
 3. 未授权时不上传上下文；`comment/share` 在已授权时也不上传；
 4. 错误 Schema、请求 ID 不匹配、无效哈希和未知内容类型被拒收；
 5. 重复点击、重复 `event_id` 或重复响应不重复上传；
@@ -588,7 +590,7 @@ HASH_MISMATCH
 守护者 App 阶段交付：
 
 - Debug APK 及 SHA-256；
-- Payload 2.2 JSON Schema、正反样例和 2.1 兼容测试；
+- Payload 2.2 JSON Schema、正反样例和旧版本拒收测试；
 - ADB 主动请求、候选和响应命令；
 - Receiver 成功、拒收、入队和后端提交日志；
 - 缓存命中与未命中的实测记录；
@@ -598,15 +600,34 @@ HASH_MISMATCH
 冻结跨系统链路。不因沙盒演示继续增加推荐、社交、普通用户上传、复杂网关或平台化能力；
 开发者内容管理工具不得改变该链路。
 
-## 17. 仍待联调确认
+## 17. 真机联调结论与剩余事项
 
 `com.mimotrust.*`、双向 Broadcast Action/Extra、Context Schema 2.2、Manifest
-Schema 1.0、Provider ID 和 audience 已于 2026-08-02 固定。沙盒代码、Schema、样例、
-测试和 Debug APK 已迁移到 2.2；在取得双向真机日志前不得声称端到端 2.2 已交付。后续仍需联调确认：
+Schema 1.0、Provider ID 和 audience 已于 2026-08-02 固定。2026-08-03 已在 Xiaomi
+`25057RA09C`、Android 16 上安装当前签名的两端 APK，并取得以下真实链路日志：
 
-1. 守护者 App 最终技术栈和新建目录；
-2. 守护者后端 `POST /v1/content-contexts` 的部署地址、认证方式和负责人；
-3. 目标真机厂商对悬浮窗、前台服务和通知权限的具体限制；
-4. 目标真机、Android 版本和最终签名证书。
+```text
+comment/share -> CONTEXT_CANDIDATE_RECEIVED
+CONTENT_CONTEXT_REQUEST_SENT -> CONTENT_CONTEXT_REQUEST_RECEIVED
+guardian_request -> GUARDIAN_CONTEXT_ACCEPTED -> VERIFICATION_JOB_CREATED
+```
+
+无候选历史时直接点击悬浮球也能完成请求。`video`、`article`、`rich_article` 和
+`image_gallery` 均已通过真机广播、后端 grant 兑换、Manifest/资源校验并进入
+`completed`。其中文章正文、图文的正文与四张图片、图集的四张图片都已被后端读取；
+这说明此前“文章和图文无法解析”的发送端缺口已补齐并通过实测。
+
+仍需完成：
+
+1. 上传一条真实音频并补做 `audio` 真机闭环；
+2. 将新版小真后端部署到长期地址并补充正式认证；
+3. 使用更多视频、文章、图文和图集回归真实 MiMo 多模态理解、检索和证据报告；
+4. 正式交付前统一签名证书，并决定是否启用 signature 权限；
+5. 补录演示视频，并验证网关、后端或 Sandbox 不可用时的用户可理解降级状态。
 
 Debug 联调阶段暂不启用 signature 权限；双方统一签名证书后再启用。接口合同冻结后只修复阻断性问题，不由任何一方单方改变跨系统合同。
+
+2026-08-03 已配置 MiMo 与 Exa，并在真机对云端 `video-001` 完成真实核验。任务
+`52e0aae3-b434-4f18-9aa0-431b504af98a` 识别 2 条主张、使用 4 条证据，约 43 秒后在
+小真历史页显示“存在误导表达”。该结果证明 Context、grant、Manifest、视频资源、MiMo
+多模态理解、Exa 检索、证据处理和移动端结果展示已形成完整闭环。

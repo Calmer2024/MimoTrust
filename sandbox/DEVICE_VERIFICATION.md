@@ -98,5 +98,58 @@ Receiver 安装后进行，不得改投 `com.mimotrust.xiaozhen`。
 - APK SHA-256：`32fcbbe4db201fede4b3d917e0568d778be151659c0392157e1a1a596eccf85b`；
 - 当前 ADB 未连接设备，尚未取得候选接收、主动请求、grant 响应和后端兑换的真机日志。
 
-main 分支 Guardian 当前严格接受 2.2，且资源兑换仍只处理视频。下一次真机验收先覆盖三条
-视频，再单独扩展并验收音频、文章、图文和图集。
+## 小真集成构建与云端接口闭环（2026-08-03）
+
+- 以 `sandbox` 分支为沙盒基线，已合入 `main` 的小真 Android App 与后端；
+- 小真严格接收 Context 2.2，五类内容均在合同、Android 和后端模型中支持；
+- Receiver 只校验、关联 `request_id` 并调度唯一 WorkManager，不再兑换 grant 或解析 Manifest；
+- 新增 `POST /v1/content-contexts`，由后端兑换 grant、校验 Manifest 并创建任务；
+- 云端 `/health` 正常，Feed 实测为 7 条：4 视频、文章、图文、图集各 1；音频待素材；
+- 使用云端 `article-001/v1` 的真实 grant 完成一次后端闭环，任务最终为 `completed`；
+- 后端测试 `131/131`、Flutter 测试 `38/38`、Android 单元测试与 Debug 构建通过；
+- 小真 Debug APK SHA-256：`bd67060484e1a823b5f9adea20683e8fd1c3656f79b0861d3be910eab6fee8ff`；
+- Sandbox Debug APK SHA-256：`49038759d2c1996ba021b782407ad4d0cbb8576b157940f50d8f4bf85419a5c0`。
+
+## Context 2.2 双向真机闭环（2026-08-03）
+
+- 设备仍为 Xiaomi `25057RA09C`，Android 16 / HyperOS V816；
+- 旧数据已先备份，再安装当前签名的 `com.mimotrust.guardian` 与
+  `com.mimotrust.controlledcontent`，随后成功恢复小真历史记录和 Sandbox 偏好；
+- 两个包的签名短哈希均为 `c69aa322`；悬浮窗和通知权限已开启；
+- 小真后端运行于电脑 `127.0.0.1:8000`，手机通过
+  `adb reverse tcp:8000 tcp:8000` 访问；内容与 grant 仍来自阿里云网关；
+- 打开评论、转发面板分别产生 `trigger=comment/share`，小真均记录
+  `CONTEXT_CANDIDATE_RECEIVED`；此时没有提交后端或兑换 grant；
+- 点击悬浮球后依次记录 `CONTENT_CONTEXT_REQUEST_SENT`、
+  `CONTENT_CONTEXT_REQUEST_RECEIVED`、`guardian_request`、
+  `GUARDIAN_CONTEXT_ACCEPTED` 和 `VERIFICATION_JOB_CREATED`；
+- 未先打开评论或转发面板时，直接点击悬浮球同样完成请求和任务创建。
+
+实测任务：
+
+| 内容 | 类型 | 任务 ID | 最终状态 |
+|---|---|---|---|
+| `video-001` | `video` | `545df7c3-8ddd-4ee9-8fd4-32bad26f0e7b` | `completed` |
+| `video-001`（无候选直接点击） | `video` | `f73b45e5-3ffa-49e3-925a-a0b47fa6e1ed` | `completed` |
+| `article-001` | `article` | `0ae3ac12-4877-45b4-a73c-619bb33e9274` | `completed` |
+| `tuwen-001` | `rich_article` | `bfbeab2c-ba94-4ecb-afb2-2a6bd8c47168` | `completed` |
+| `pictures-001` | `image_gallery` | `82888ff9-a716-4aa9-b005-8a0c655562ec` | `completed` |
+
+以上任务均由 Android 接收后唯一入队，经 `POST /v1/content-contexts` 进入后端，完成
+grant 兑换、Manifest 校验、资源下载与 SHA-256 校验后返回结果。云端尚无音频素材，因此
+`audio` 仍只有合同和自动化测试记录。此次本地后端未配置 `MIMO_API_KEY`，任务完成结果
+属于本地结构化预览，不能作为 MiMo 实际理解和证据检索效果验收。
+
+## MiMo 与证据检索真机闭环（2026-08-03）
+
+- 本地 `.env` 已配置 MiMo 与 Exa，`GET /api/health` 返回
+  `mimo_configured: true`；
+- 首次真实视频调用暴露 MiMo 视频概括响应兼容问题：该路径只读取
+  `message.content`，没有兼容 `reasoning_content`，任务在 `media_extracting` 失败；
+- 视频概括现统一使用结构化 JSON Schema 和公共响应读取逻辑，相关测试 `35/35` 通过；
+- 真机重新核验 `video-001`，任务
+  `52e0aae3-b434-4f18-9aa0-431b504af98a` 完成视频理解、主张提取、检索规划、
+  Exa 检索、证据初筛和报告生成；
+- 最终状态为 `completed`，识别 2 条主张、使用 4 条证据，移动端结论为
+  `存在误导表达`，摘要为“基础事实有依据，但输入将不同事件混淆，形成误导性叙事。”；
+- 小真历史页已真机确认显示该结果，分析用时约 43 秒。
